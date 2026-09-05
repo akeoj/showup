@@ -45,6 +45,32 @@ function assertOnline() {
   if (!isOnline()) throw new OfflineError();
 }
 
+/**
+ * Turn PostgREST's internals into something a participant can act on.
+ *
+ * A missing migration surfaces as "Could not find the function
+ * public.x without parameters in the schema cache", which is precise,
+ * accurate, and completely meaningless to the person holding the phone. It
+ * also points at the wrong culprit: nothing is wrong with their device.
+ */
+export function describeRpcError(message: string, feature: string): string {
+  const m = message.toLowerCase();
+
+  if (m.includes('schema cache') || m.includes('could not find the function')) {
+    return `${feature} isn't available on this server yet — the database is missing an update. Nothing is wrong with your phone.`;
+  }
+  if (m.includes('jwt') || m.includes('not authenticated')) {
+    return 'You are not signed in yet. Give it a moment and try again.';
+  }
+  if (m.includes('permission denied') || m.includes('row-level security')) {
+    return `You do not have access to do that.`;
+  }
+  if (/fetch|network|failed to fetch/i.test(message)) {
+    return 'Could not reach the server. Check your connection and try again.';
+  }
+  return message;
+}
+
 export interface CreateChallengeInput {
   name: string;
   activity_type: string;
@@ -77,7 +103,7 @@ export async function createChallenge(input: CreateChallengeInput): Promise<Chal
     p_description: input.description ?? null,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeRpcError(error.message, 'Creating a challenge'));
   const challenge = data as Challenge;
 
   await Promise.all([
@@ -102,7 +128,7 @@ export async function getChallengeByCode(code: string): Promise<ChallengePreview
     p_code: code.trim().toUpperCase(),
   });
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeRpcError(error.message, 'Looking up a challenge'));
   const row = (data as ChallengePreview[])?.[0];
   return row ?? null;
 }
@@ -155,7 +181,7 @@ export async function joinChallenge(
     throw new Error(
       error.message.includes('challenge not found')
         ? "That code doesn't match any challenge."
-        : error.message,
+        : describeRpcError(error.message, 'Joining'),
     );
   }
 
@@ -258,7 +284,7 @@ export async function getPublicChallenges(
     p_limit: 40,
     p_offset: 0,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeRpcError(error.message, 'Explore'));
   return (data as PublicChallenge[]) ?? [];
 }
 
@@ -279,7 +305,7 @@ export async function getLeaderboard(challengeId: string): Promise<LeaderboardRo
   if (error) {
     const cached = await getLeaderboardCached(challengeId);
     if (cached) return cached;
-    throw new Error(error.message);
+    throw new Error(describeRpcError(error.message, 'The leaderboard'));
   }
 
   const rows = (data as LeaderboardRow[]) ?? [];
@@ -446,7 +472,7 @@ export async function createTransferCode(): Promise<TransferCode> {
   if (!uid) throw new Error('Not signed in yet — try again in a moment.');
 
   const { data, error } = await supabase.rpc('create_transfer_code');
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeRpcError(error.message, 'Moving to another device'));
 
   const row = (data as TransferCode[])?.[0];
   if (!row) throw new Error('Could not create a transfer code.');
@@ -473,7 +499,7 @@ export async function claimTransfer(code: string): Promise<TransferResult> {
     throw new Error(
       error.message.includes('not valid or has expired')
         ? 'That code is not valid, has already been used, or has expired. Codes last 30 minutes.'
-        : error.message,
+        : describeRpcError(error.message, 'Restoring your progress'),
     );
   }
 
