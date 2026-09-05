@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOnline, useSyncStatus } from '@/features/challenges/hooks';
+import { useAppStore } from '@/store/appStore';
 
 interface Props {
   title?: string;
@@ -41,6 +42,7 @@ export function AppShell({ title, back, action, children, bare }: Props) {
       )}
 
       <ConnectionBanner />
+      <RestoreBanner />
 
       <main className={bare ? 'flex-1' : 'flex-1 px-4 pb-24 pt-4'}>{children}</main>
     </div>
@@ -67,6 +69,39 @@ export function ConnectionBanner() {
       {online && sync.pending > 0 && (
         <>{sync.syncing ? 'Syncing…' : `${sync.pending} workout(s) waiting to sync`}</>
       )}
+    </div>
+  );
+}
+
+/**
+ * Shown when this device had to start a new anonymous identity and rebuilt
+ * itself from local data. Silence here would look exactly like data loss.
+ */
+function RestoreBanner() {
+  const restoring = useAppStore((s) => s.restoring);
+  const restored = useAppStore((s) => s.restored);
+  const dismiss = useAppStore((s) => s.dismissRestored);
+
+  if (restoring) {
+    return (
+      <div role="status" className="bg-flame/15 px-4 py-2 text-center text-sm text-flame">
+        Restoring your challenges from this phone…
+      </div>
+    );
+  }
+
+  if (!restored) return null;
+
+  return (
+    <div role="status" className="flex items-center gap-2 bg-lime/15 px-4 py-2 text-sm text-lime">
+      <span className="flex-1">
+        Signed back in and restored {restored.challenges} challenge
+        {restored.challenges === 1 ? '' : 's'} and {restored.workouts} day
+        {restored.workouts === 1 ? '' : 's'} of progress from this phone.
+      </span>
+      <button onClick={dismiss} aria-label="Dismiss" className="px-2 text-lg leading-none">
+        ×
+      </button>
     </div>
   );
 }

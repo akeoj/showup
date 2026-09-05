@@ -1,7 +1,10 @@
 import {
+  allLocalWorkouts,
   cacheChallenge,
   db,
   getCachedChallenge,
+  getMemberships,
+  getLocalNickname,
   rememberMembership,
   saveLocalWorkout,
   setLocalNickname,
@@ -133,6 +136,11 @@ export async function joinChallenge(code: string, nickname: string): Promise<str
   return challengeId;
 }
 
+/** Cache read, no network, no throwing — safe to render before anything loads. */
+export async function getChallengeCached(id: string): Promise<Challenge | null> {
+  return (await getCachedChallenge(id)) ?? null;
+}
+
 /** Reads through the cache: the dashboard must render offline. */
 export async function getChallenge(id: string): Promise<Challenge | null> {
   if (isSupabaseConfigured && isOnline()) {
@@ -146,20 +154,30 @@ export async function getChallenge(id: string): Promise<Challenge | null> {
   return (await getCachedChallenge(id)) ?? null;
 }
 
+/**
+ * The server list, merged with anything this device remembers joining.
+ *
+ * The merge matters: if the session is briefly a different (or absent)
+ * identity, the RPC returns nothing, and replacing the list with that empty
+ * result is indistinguishable from "all your challenges are gone".
+ */
 export async function getMyChallenges(): Promise<MyChallenge[]> {
-  if (!isSupabaseConfigured || !isOnline()) return cachedMyChallenges();
-  await ensureSession();
+  const local = await getMyChallengesCached();
+  if (!isSupabaseConfigured || !isOnline()) return local;
 
+  await ensureSession();
   const { data, error } = await supabase.rpc('get_my_challenges');
-  if (error) return cachedMyChallenges();
+  if (error) return local;
 
   const rows = (data as MyChallenge[]) ?? [];
   await Promise.all(rows.map((r) => cacheChallenge(r as unknown as Challenge)));
-  return rows;
+
+  const seen = new Set(rows.map((r) => r.id));
+  return [...rows, ...local.filter((l) => !seen.has(l.id))];
 }
 
-async function cachedMyChallenges(): Promise<MyChallenge[]> {
-  const memberships = await db.memberships.toArray();
+export async function getMyChallengesCached(): Promise<MyChallenge[]> {
+  const memberships = await getMemberships();
   const out: MyChallenge[] = [];
   for (const m of memberships) {
     const c = await getCachedChallenge(m.challenge_id);
@@ -201,24 +219,38 @@ export async function getPublicChallenges(
   return (data as PublicChallenge[]) ?? [];
 }
 
+export async function getLeaderboardCached(challengeId: string): Promise<LeaderboardRow[] | null> {
+  const cached = await db.leaderboards.get(challengeId);
+  return cached?.rows ?? null;
+}
+
 export async function getLeaderboard(challengeId: string): Promise<LeaderboardRow[]> {
   if (!isSupabaseConfigured || !isOnline()) {
-    const cached = await db.leaderboards.get(challengeId);
-    if (cached) return cached.rows;
+    const cached = await getLeaderboardCached(challengeId);
+    if (cached) return cached;
     throw new OfflineError('Leaderboard needs a connection. Showing your local progress only.');
   }
 
   await ensureSession();
   const { data, error } = await supabase.rpc('get_leaderboard', { p_challenge_id: challengeId });
   if (error) {
-    const cached = await db.leaderboards.get(challengeId);
-    if (cached) return cached.rows;
+    const cached = await getLeaderboardCached(challengeId);
+    if (cached) return cached;
     throw new Error(error.message);
   }
 
   const rows = (data as LeaderboardRow[]) ?? [];
   await db.leaderboards.put({ challenge_id: challengeId, rows, fetched_at: Date.now() });
   return rows;
+}
+
+export async function getMyHistoryCached(challengeId: string): Promise<HistoryRow[]> {
+  const challenge = await getCachedChallenge(challengeId);
+  const target = challenge?.daily_target ?? 0;
+  const local = await db.workouts.where('challenge_id').equals(challengeId).toArray();
+  return local
+    .map((w) => ({ workout_date: w.workout_date, count: w.count, met_target: w.count >= target }))
+    .sort((a, b) => b.workout_date.localeCompare(a.workout_date));
 }
 
 export async function getMyHistory(challengeId: string): Promise<HistoryRow[]> {
@@ -231,21 +263,13 @@ export async function getMyHistory(challengeId: string): Promise<HistoryRow[]> {
       return rows;
     }
   }
-
-  // Offline: rebuild history from the local store so the calendar still fills in.
-  const challenge = await getCachedChallenge(challengeId);
-  const local = await db.workouts.where('challenge_id').equals(challengeId).toArray();
-  const target = challenge?.daily_target ?? 0;
-  return local
-    .map((w) => ({ workout_date: w.workout_date, count: w.count, met_target: w.count >= target }))
-    .sort((a, b) => b.workout_date.localeCompare(a.workout_date));
+  return getMyHistoryCached(challengeId);
 }
 
 /**
  * Membership check that survives being offline: the local memberships table is
  * authoritative for "I already joined", and the server is consulted only to
- * discover a membership this device does not know about yet (e.g. same
- * anonymous identity, different entry point).
+ * discover a membership this device does not know about yet.
  */
 export async function isParticipant(challengeId: string): Promise<boolean> {
   const local = await db.memberships.get(challengeId);
@@ -303,4 +327,53 @@ export async function recordWorkout(args: {
     source: args.source,
   });
   void flushQueue('workout-saved');
+}
+
+/**
+ * Rebuild this device's server-side presence after an identity reset.
+ *
+ * An anonymous identity that is genuinely lost cannot be recovered — but
+ * everything needed to reconstruct it lives locally: the challenge codes, the
+ * nickname, and every daily total. So: re-join each cached challenge under the
+ * new identity, then re-queue every local workout. `join_challenge` upserts and
+ * `save_workout` keeps the greater count, so running this twice is harmless.
+ *
+ * The old rows stay orphaned on the server (an abandoned participant with the
+ * old totals); worth a cleanup job eventually, not worth blocking on now.
+ */
+export async function restoreAfterIdentityReset(): Promise<{
+  challenges: number;
+  workouts: number;
+}> {
+  if (!isSupabaseConfigured || !isOnline()) return { challenges: 0, workouts: 0 };
+
+  const uid = await ensureSession();
+  if (!uid) return { challenges: 0, workouts: 0 };
+
+  const memberships = await getMemberships();
+  const nickname = (await getLocalNickname()) || 'Anonymous';
+  let rejoined = 0;
+
+  for (const m of memberships) {
+    const challenge = await getCachedChallenge(m.challenge_id);
+    if (!challenge?.code) continue;
+    const { error } = await supabase.rpc('join_challenge', {
+      p_code: challenge.code,
+      p_nickname: m.nickname || nickname,
+    });
+    if (!error) rejoined += 1;
+  }
+
+  const workouts = await allLocalWorkouts();
+  for (const w of workouts) {
+    await saveLocalWorkout({
+      challengeId: w.challenge_id,
+      date: w.workout_date,
+      count: w.count,
+      source: w.source,
+    });
+  }
+
+  void flushQueue('identity-restore');
+  return { challenges: rejoined, workouts: workouts.length };
 }

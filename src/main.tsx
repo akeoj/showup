@@ -1,7 +1,9 @@
 import { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AppRouter } from './app/router';
+import { UpdatePrompt } from './components/UpdatePrompt';
 import { startSyncManager } from './lib/sync';
+import { requestPersistentStorage } from './lib/storage';
 import { useAppStore } from './store/appStore';
 import './index.css';
 
@@ -10,6 +12,9 @@ function Boot() {
   const ready = useAppStore((s) => s.ready);
 
   useEffect(() => {
+    // Ask the browser not to evict our IndexedDB. Without this, Safari clears
+    // the participant's workouts (and identity) after about a week idle.
+    void requestPersistentStorage();
     void init();
     startSyncManager();
   }, [init]);
@@ -22,7 +27,12 @@ function Boot() {
     );
   }
 
-  return <AppRouter />;
+  return (
+    <>
+      <AppRouter />
+      <UpdatePrompt />
+    </>
+  );
 }
 
 createRoot(document.getElementById('root')!).render(

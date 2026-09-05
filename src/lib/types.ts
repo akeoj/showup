@@ -129,5 +129,7 @@ export interface SyncQueueItem {
 export interface LocalUser {
   id: 'me';
   nickname: string;
+  /** Last auth user id this device held — used to detect an identity reset. */
+  user_id?: string;
   updated_at: number;
 }

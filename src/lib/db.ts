@@ -29,6 +29,23 @@ export interface Membership {
   joined_at: number;
 }
 
+/**
+ * A copy of the Supabase session, mirrored out of localStorage.
+ *
+ * Anonymous identity is the single point of failure in this product: lose the
+ * session and the participant becomes a *different person* with an empty
+ * history. localStorage and IndexedDB are evicted by different mechanisms on
+ * iOS, so holding the refresh token in both gives the identity two lives
+ * instead of one.
+ */
+export interface SessionMirror {
+  id: 'session';
+  access_token: string;
+  refresh_token: string;
+  user_id: string;
+  saved_at: number;
+}
+
 class ShowupDB extends Dexie {
   localUser!: Table<LocalUser, string>;
   challenges!: Table<Challenge, string>;
@@ -37,6 +54,7 @@ class ShowupDB extends Dexie {
   syncQueue!: Table<SyncQueueItem, number>;
   leaderboards!: Table<CachedLeaderboard, string>;
   histories!: Table<CachedHistory, string>;
+  session!: Table<SessionMirror, string>;
 
   constructor() {
     super('showup');
@@ -48,6 +66,11 @@ class ShowupDB extends Dexie {
       syncQueue: '++id, ref, status, next_attempt_at',
       leaderboards: 'challenge_id',
       histories: 'challenge_id',
+    });
+    // v2 adds the session mirror. Existing stores carry over untouched, so an
+    // upgrade never costs anyone their workouts.
+    this.version(2).stores({
+      session: 'id',
     });
   }
 }
@@ -62,7 +85,41 @@ export async function getLocalNickname(): Promise<string> {
 }
 
 export async function setLocalNickname(nickname: string): Promise<void> {
-  await db.localUser.put({ id: 'me', nickname: nickname.trim(), updated_at: Date.now() });
+  const existing = await db.localUser.get('me');
+  await db.localUser.put({
+    ...existing,
+    id: 'me',
+    nickname: nickname.trim(),
+    updated_at: Date.now(),
+  });
+}
+
+/** The last user id this device successfully held, session or not. */
+export async function getKnownUserId(): Promise<string | null> {
+  const row = await db.localUser.get('me');
+  return row?.user_id ?? null;
+}
+
+export async function setKnownUserId(userId: string): Promise<void> {
+  const existing = await db.localUser.get('me');
+  await db.localUser.put({
+    id: 'me',
+    nickname: existing?.nickname ?? '',
+    user_id: userId,
+    updated_at: Date.now(),
+  });
+}
+
+export async function saveSessionMirror(m: Omit<SessionMirror, 'id' | 'saved_at'>): Promise<void> {
+  await db.session.put({ ...m, id: 'session', saved_at: Date.now() });
+}
+
+export async function getSessionMirror(): Promise<SessionMirror | undefined> {
+  return db.session.get('session');
+}
+
+export async function clearSessionMirror(): Promise<void> {
+  await db.session.delete('session');
 }
 
 export async function cacheChallenge(challenge: Challenge): Promise<void> {
@@ -75,6 +132,10 @@ export async function getCachedChallenge(id: string): Promise<Challenge | undefi
 
 export async function rememberMembership(m: Membership): Promise<void> {
   await db.memberships.put(m);
+}
+
+export async function getMemberships(): Promise<Membership[]> {
+  return db.memberships.toArray();
 }
 
 export async function getDayCount(challengeId: string, date: string): Promise<number> {
@@ -138,4 +199,9 @@ export async function pendingCount(): Promise<number> {
 
 export async function localHistory(challengeId: string): Promise<LocalWorkout[]> {
   return db.workouts.where('challenge_id').equals(challengeId).reverse().sortBy('workout_date');
+}
+
+/** Every locally-held workout, used to re-push history after an identity reset. */
+export async function allLocalWorkouts(): Promise<LocalWorkout[]> {
+  return db.workouts.toArray();
 }

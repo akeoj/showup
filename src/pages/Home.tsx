@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { AppShell } from '@/components/AppShell';
 import { Button } from '@/components/Button';
 import { ProgressBar } from '@/components/ProgressBar';
-import { getMyChallenges } from '@/features/challenges/api';
+import { getMyChallenges, getMyChallengesCached } from '@/features/challenges/api';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { getActivity } from '@/lib/activities';
 import type { MyChallenge } from '@/lib/types';
@@ -13,10 +13,29 @@ export function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    void getMyChallenges()
-      .then(setMine)
-      .catch(() => setMine([]))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+
+    // Local list first so the app opens showing your challenges, not a spinner
+    // — then refresh from the server without ever blanking what is on screen.
+    void (async () => {
+      const cached = await getMyChallengesCached();
+      if (!cancelled && cached.length) {
+        setMine(cached);
+        setLoading(false);
+      }
+      try {
+        const fresh = await getMyChallenges();
+        if (!cancelled) setMine(fresh);
+      } catch {
+        /* keep whatever is already showing */
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (

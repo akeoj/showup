@@ -28,7 +28,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt', not 'autoUpdate'. autoUpdate reloads the page the moment a new
+      // service worker activates — which is how you lose a set of push-ups to a
+      // deploy. The app now asks first (see components/UpdatePrompt.tsx).
+      registerType: 'prompt',
+      // We register the SW ourselves from the React tree so the prompt can be
+      // wired to it; the auto-injected script would register a second time.
+      injectRegister: null,
       includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png'],
       manifest: {
         name: 'Showup — daily challenges',
@@ -39,15 +45,30 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
+        scope: '/',
+        id: '/',
         icons: [
-          { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
-        navigateFallbackDenylist: [/^\/api/],
+
+        // Serves the precached shell for any route, so the installed app opens
+        // and deep links resolve with no connection. The plugin defaults this
+        // on; it is stated explicitly because it is load-bearing for a SPA and
+        // should not silently change with a plugin upgrade.
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/api/, /\/[^/?]+\.[^/]+$/],
+
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        // Never skip waiting on our own: the update prompt decides when.
+        skipWaiting: false,
+
         runtimeCaching: [
           {
             // MediaPipe wasm + the pose model, served from the CDN.
@@ -67,6 +88,19 @@ export default defineConfig({
               cacheName: 'pose-model',
               expiration: { maxEntries: 5, maxAgeSeconds: 60 * 60 * 24 * 180 },
               cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Supabase reads: network first, but a cached copy keeps the
+            // leaderboard on screen when the connection drops mid-session.
+            urlPattern: /\/rest\/v1\/.*/i,
+            handler: 'NetworkFirst',
+            method: 'GET',
+            options: {
+              cacheName: 'supabase-reads',
+              networkTimeoutSeconds: 6,
+              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 },
+              cacheableResponse: { statuses: [200] },
             },
           },
         ],
