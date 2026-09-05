@@ -2,8 +2,32 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'node:path';
+import fs from 'node:fs';
+import { execSync } from 'node:child_process';
+
+/**
+ * A build identity the app can compare against the server, independently of
+ * the service worker.
+ *
+ * iOS gives a home-screen app its own service worker registration, and is
+ * famously reluctant to re-check it in an app that is only ever resumed rather
+ * than cold launched. So the app must be able to notice it is stale without
+ * asking the worker — that is what version.json is for.
+ */
+const BUILD_ID =
+  process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ||
+  (() => {
+    try {
+      return execSync('git rev-parse --short HEAD').toString().trim();
+    } catch {
+      return String(Date.now());
+    }
+  })();
 
 export default defineConfig({
+  define: {
+    __BUILD_ID__: JSON.stringify(BUILD_ID),
+  },
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
   },
@@ -27,6 +51,20 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    {
+      // Emitted after the bundle so it is never part of the precache manifest:
+      // a version file the service worker had cached would defeat the point.
+      name: 'showup:emit-version',
+      apply: 'build',
+      closeBundle() {
+        const out = path.resolve(__dirname, 'dist/version.json');
+        fs.mkdirSync(path.dirname(out), { recursive: true });
+        fs.writeFileSync(
+          out,
+          JSON.stringify({ version: BUILD_ID, builtAt: new Date().toISOString() }, null, 2),
+        );
+      },
+    },
     VitePWA({
       // 'prompt', not 'autoUpdate'. autoUpdate reloads the page the moment a new
       // service worker activates — which is how you lose a set of push-ups to a
@@ -89,6 +127,12 @@ export default defineConfig({
               expiration: { maxEntries: 5, maxAgeSeconds: 60 * 60 * 24 * 180 },
               cacheableResponse: { statuses: [0, 200] },
             },
+          },
+          {
+            // Never cached, by anyone. This file exists to tell the app the
+            // truth about what is deployed.
+            urlPattern: /\/version\.json$/,
+            handler: 'NetworkOnly',
           },
           {
             // Supabase reads: network first, but a cached copy keeps the
