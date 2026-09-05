@@ -106,7 +106,42 @@ export async function getChallengeByCode(code: string): Promise<ChallengePreview
   return row ?? null;
 }
 
-export async function joinChallenge(code: string, nickname: string): Promise<string> {
+/**
+ * Turn the join preview into a cacheable challenge row.
+ *
+ * The preview already carries every field the dashboard needs, so caching it
+ * means landing on the challenge page never depends on a second round trip
+ * succeeding — which is exactly the trip that fails on a bad connection right
+ * after someone taps Join.
+ */
+export function challengeFromPreview(p: ChallengePreview): Challenge {
+  return {
+    id: p.id,
+    name: p.name,
+    code: p.code,
+    activity_type: p.activity_type,
+    tracking_mode: p.tracking_mode,
+    unit: p.unit,
+    daily_target: p.daily_target,
+    start_date: p.start_date,
+    end_date: p.end_date,
+    visibility: p.visibility,
+    timezone: p.timezone,
+    description: p.description,
+  };
+}
+
+/** Cache a challenge we already have in hand, without asking the server. */
+export async function seedChallengeCache(challenge: Challenge): Promise<void> {
+  await cacheChallenge(challenge);
+}
+
+export async function joinChallenge(
+  code: string,
+  nickname: string,
+  /** Everything we already know about the challenge, cached before navigating. */
+  seed?: Challenge,
+): Promise<string> {
   assertOnline();
   await ensureSession();
 
@@ -124,6 +159,10 @@ export async function joinChallenge(code: string, nickname: string): Promise<str
   }
 
   const challengeId = data as string;
+
+  // Cache and remember BEFORE returning, so the challenge page has what it
+  // needs the instant it mounts — network or no network.
+  if (seed) await cacheChallenge({ ...seed, id: challengeId });
   await setLocalNickname(nickname);
   await rememberMembership({
     challenge_id: challengeId,
@@ -131,8 +170,11 @@ export async function joinChallenge(code: string, nickname: string): Promise<str
     is_owner: false,
     joined_at: Date.now(),
   });
-  // Pull the full row now so the dashboard works if the network drops next.
-  await getChallenge(challengeId).catch(() => undefined);
+
+  // Refresh from the server too, but never let a failure here block the join.
+  if (!seed) await getChallenge(challengeId).catch(() => undefined);
+  else void getChallenge(challengeId).catch(() => undefined);
+
   return challengeId;
 }
 

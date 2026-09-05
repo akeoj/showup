@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '@/components/AppShell';
 import { Button } from '@/components/Button';
-import { getChallengeByCode, joinChallenge } from '@/features/challenges/api';
+import {
+  challengeFromPreview,
+  getChallengeByCode,
+  joinChallenge,
+  seedChallengeCache,
+} from '@/features/challenges/api';
 import { getActivity } from '@/lib/activities';
 import { formatRange } from '@/lib/dates';
 import { useAppStore } from '@/store/appStore';
@@ -34,6 +39,9 @@ export function JoinChallenge() {
         return;
       }
       if (found.already_joined) {
+        // Already a member — cache what we just fetched so the dashboard
+        // renders immediately instead of re-fetching the same row.
+        await seedChallengeCache(challengeFromPreview(found));
         navigate(`/challenge/${found.id}`, { replace: true });
         return;
       }
@@ -57,7 +65,7 @@ export function JoinChallenge() {
     setError(null);
     try {
       await setNickname(nickname);
-      const id = await joinChallenge(preview.code, nickname);
+      const id = await joinChallenge(preview.code, nickname, challengeFromPreview(preview));
       navigate(`/challenge/${id}`, { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not join.');

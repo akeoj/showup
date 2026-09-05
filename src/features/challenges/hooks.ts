@@ -38,16 +38,18 @@ export function useChallenge(id: string | undefined) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    if (!id) return;
+  const reload = useCallback(async (): Promise<Challenge | null> => {
+    if (!id) return null;
     try {
       const fresh = await getChallenge(id);
       if (fresh) {
         setChallenge(fresh);
         setError(null);
       }
+      return fresh;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return null;
     }
   }, [id]);
 
@@ -55,19 +57,29 @@ export function useChallenge(id: string | undefined) {
     let cancelled = false;
     if (!id) return;
 
+    setLoading(true);
+    setError(null);
+
     void (async () => {
       const cached = await getChallengeCached(id);
-      if (!cancelled && cached) setChallenge(cached);
-      if (!cancelled) setLoading(false);
+      if (cancelled) return;
 
-      await reload();
-      if (!cancelled) {
+      if (cached) {
+        // Render the cached copy at once, and keep `loading` false while the
+        // background refresh runs — there is already something on screen.
+        setChallenge(cached);
         setLoading(false);
-        setChallenge((current) => {
-          if (!current && !cached) setError('Challenge not found on this device.');
-          return current;
-        });
+        await reload();
+        return;
       }
+
+      // Nothing cached: this is the path a brand-new join takes. Stay in the
+      // loading state until the network has actually answered, otherwise the
+      // page renders "not found" for a challenge that exists perfectly well.
+      const fresh = await reload();
+      if (cancelled) return;
+      setLoading(false);
+      if (!fresh) setError('Challenge not found on this device.');
     })();
 
     return () => {

@@ -20,7 +20,7 @@ import { useAppStore } from '@/store/appStore';
 export function ChallengePage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { challenge, loading } = useChallenge(id);
+  const { challenge, loading, reload: reloadChallenge } = useChallenge(id);
   const { count, today, synced, reload: reloadToday } = useTodayCount(challenge);
   const { rows, error: boardError } = useLeaderboard(challenge);
   const { rows: history, reload: reloadHistory } = useHistory(id);
@@ -47,9 +47,16 @@ export function ChallengePage() {
   if (!challenge) {
     return (
       <AppShell title="Not found" back="/">
-        <p className="py-16 text-center text-muted">
-          We couldn't find that challenge on this device.
-        </p>
+        <div className="py-16 text-center">
+          <p className="text-muted">We couldn't load that challenge.</p>
+          <p className="mt-1 text-sm text-muted/70">
+            If you just joined, this is usually a dropped connection rather than a missing
+            challenge.
+          </p>
+          <Button className="mt-5" variant="secondary" onClick={() => void reloadChallenge()}>
+            Try again
+          </Button>
+        </div>
       </AppShell>
     );
   }
@@ -64,7 +71,7 @@ export function ChallengePage() {
   const join = async () => {
     setJoining(true);
     try {
-      await joinChallenge(challenge.code, nickname || 'Anonymous');
+      await joinChallenge(challenge.code, nickname || 'Anonymous', challenge);
       setMember(true);
     } finally {
       setJoining(false);
