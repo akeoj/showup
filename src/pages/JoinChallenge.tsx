@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '@/components/AppShell';
 import { Button } from '@/components/Button';
+import { InstallPrompt } from '@/components/InstallPrompt';
 import {
   challengeFromPreview,
   getChallengeByCode,
@@ -79,6 +80,9 @@ export function JoinChallenge() {
     return (
       <AppShell title="Join challenge" back={() => setPreview(null)}>
         <div className="space-y-5">
+          {/* Right where intent is highest: they came from a WhatsApp link and
+              are about to commit to showing up daily. */}
+          <InstallPrompt headline="Add Showup to your home screen first" />
           <div className="card text-center">
             <span className="text-3xl" aria-hidden>
               {activity.emoji}

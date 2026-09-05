@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '@/components/AppShell';
 import { Button } from '@/components/Button';
 import { DayCalendar } from '@/components/DayCalendar';
+import { InstallPrompt } from '@/components/InstallPrompt';
 import { Leaderboard } from '@/components/Leaderboard';
 import { ManualEntry } from '@/components/ManualEntry';
 import { ProgressBar } from '@/components/ProgressBar';
@@ -104,6 +105,8 @@ export function ChallengePage() {
       }
     >
       <div className="space-y-5">
+        <InstallPrompt headline="You're in — add Showup to your home screen" />
+
         {member === false && (
           <div className="card border-flame/40 bg-flame/10">
             <p className="text-sm">You're viewing this challenge but haven't joined yet.</p>

@@ -26,6 +26,9 @@ export function Workout() {
   const [popKey, setPopKey] = useState(0);
   const [resumable, setResumable] = useState<number | null>(null);
   const [noFrames, setNoFrames] = useState(false);
+  const [slow, setSlow] = useState(false);
+  const [slowDismissed, setSlowDismissed] = useState(false);
+  const slowTicks = useRef(0);
 
   const baseRef = useRef(0);
 
@@ -82,6 +85,24 @@ export function Workout() {
     }, 3500);
     return () => window.clearTimeout(timer);
   }, [phase, camera.status]);
+
+  /**
+   * Entry-level Androids can run this pipeline at single-digit frame rates.
+   * Below roughly 10fps a rep is only a handful of samples, the smoother lags
+   * the real movement, and depth gets missed — the counter quietly
+   * under-counts. Better to say so and offer the manual route than to let
+   * someone finish a set believing the number.
+   */
+  useEffect(() => {
+    if (phase !== 'live' || ui.fps === 0) return;
+    if (ui.fps < 10) {
+      slowTicks.current += 1;
+      if (slowTicks.current >= 3) setSlow(true);
+    } else {
+      slowTicks.current = 0;
+      setSlow(false);
+    }
+  }, [ui.fps, phase]);
 
   // Keep the screen awake during a set — the phone is on the floor, untouched.
   useEffect(() => {
@@ -316,8 +337,27 @@ export function Workout() {
             </div>
           )}
 
+          {/* Low frame rate — the counter will under-count here */}
+          {slow && !noFrames && !slowDismissed && (
+            <div className="absolute inset-x-4 top-[18%] rounded-2xl bg-black/80 p-4 text-sm text-white backdrop-blur">
+              <p className="font-medium">
+                This phone is running the counter at {ui.fps} fps.
+              </p>
+              <p className="mt-1 text-white/70">
+                Below about 10 it starts missing reps. Counting still works — just check the number
+                before you finish, or log it yourself.
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button variant="secondary" onClick={() => setSlowDismissed(true)}>
+                  Keep counting
+                </Button>
+                <Button onClick={() => setManualOpen(true)}>Count it myself</Button>
+              </div>
+            </div>
+          )}
+
           {/* Coaching */}
-          {!noFrames && (ui.coaching || ui.formWarning || (ui.lastRejection && !ui.coaching)) && (
+          {!noFrames && !slow && (ui.coaching || ui.formWarning || (ui.lastRejection && !ui.coaching)) && (
             <div
               role="status"
               className="absolute inset-x-4 top-[22%] rounded-2xl bg-black/65 px-4 py-3 text-center text-sm text-white backdrop-blur"

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '@/components/AppShell';
 import { Button } from '@/components/Button';
+import { InstallPrompt } from '@/components/InstallPrompt';
 import { ProgressBar } from '@/components/ProgressBar';
 import { getMyChallenges, getMyChallengesCached } from '@/features/challenges/api';
 import { isSupabaseConfigured } from '@/lib/supabase';
@@ -60,7 +61,11 @@ export function Home() {
         </div>
       )}
 
-      <div className="mt-7 space-y-2.5">
+      <div className="mt-6">
+        <InstallPrompt />
+      </div>
+
+      <div className="mt-6 space-y-2.5">
         <Link to="/create" className="block">
           <Button full>Create a challenge</Button>
         </Link>
