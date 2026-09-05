@@ -34,6 +34,9 @@ export interface WorkoutUiState {
   foreshortening: number;
   /** Which gate is currently stopping a rep from being counted. */
   blockedBy: string | null;
+  /** Framing problem, or null when the shot is good. */
+  framingProblem: string | null;
+  fullBody: boolean;
 }
 
 const SKELETON: [number, number][] = [
@@ -78,6 +81,8 @@ export function useWorkoutEngine(
     legRatio: 2,
     foreshortening: 2,
     blockedBy: null,
+    framingProblem: null,
+    fullBody: false,
   });
 
   const counterRef = useRef<PushupCounter | null>(null);
@@ -208,6 +213,8 @@ export function useWorkoutEngine(
           legRatio: metrics?.legRatio ?? 2,
           foreshortening: metrics?.foreshortening ?? 2,
           blockedBy: update.blockedBy,
+          framingProblem: metrics?.framing.problem ?? 'no-person',
+          fullBody: metrics?.framing.fullBody ?? false,
         };
         return next;
       });

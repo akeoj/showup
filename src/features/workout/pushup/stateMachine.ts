@@ -1,5 +1,5 @@
 import { DEFAULT_PUSHUP_CONFIG, type PushupConfig } from './config';
-import { AngleSmoother, type PoseMetrics } from './geometry';
+import { AngleSmoother, type FramingProblem, type PoseMetrics } from './geometry';
 
 export type CounterState =
   | 'idle' // no usable pose yet
@@ -38,6 +38,7 @@ export type BlockReason =
   | 'not-enough-joints'
   | 'orientation'
   | 'body-not-straight'
+  | 'framing'
   | 'calibrating'
   | 'none';
 
@@ -173,6 +174,27 @@ export class PushupCounter {
     // --- Calibration --------------------------------------------------------
     if (this.state === 'idle' || this.state === 'calibrating') {
       this.state = 'calibrating';
+
+      // Framing is checked here and ONLY here. Getting set up badly is worth
+      // blocking on, because the leg geometry that tells a plank from a person
+      // standing up is missing when the lower body is out of shot. Losing a
+      // knee for a moment mid-set is not worth abandoning a rep over, so once
+      // calibrated this is never re-tested.
+      const framingHint = framingCoaching(metrics.framing.problem);
+      if (framingHint) {
+        this.validSince = null;
+        return this.emit({
+          repCounted: false,
+          rejected: null,
+          depth: 0,
+          coaching: framingHint,
+          formWarning,
+          angle,
+          confidence: metrics.confidence,
+          blockedBy: 'framing',
+        });
+      }
+
       if (this.validSince === null) this.validSince = now;
 
       const held = now - this.validSince;
@@ -354,6 +376,26 @@ export class PushupCounter {
       confidence: args.confidence,
       blockedBy: args.blockedBy ?? null,
     };
+  }
+}
+
+/**
+ * The instruction that actually fixes the shot. "Move back" is the one people
+ * need most: close enough for the counter to see shoulders and elbows still
+ * looks like it should work, so nothing on screen explained the failure.
+ */
+export function framingCoaching(problem: FramingProblem): string | null {
+  switch (problem) {
+    case 'no-person':
+      return 'Step into frame so the camera can see you.';
+    case 'too-close':
+      return 'Move back — the camera needs your whole body in frame, head to feet.';
+    case 'lower-body-missing':
+      return 'Move back a bit more — your legs need to be in frame too.';
+    case 'too-far':
+      return 'Come a little closer — you are too small in the frame to read.';
+    default:
+      return null;
   }
 }
 

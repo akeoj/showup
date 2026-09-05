@@ -18,6 +18,7 @@ function metrics(elbowAngle: number, overrides: Partial<PoseMetrics> = {}): Pose
     confidence: 0.9,
     hasVisibilityData: true,
     usedWorldLandmarks: true,
+    framing: { problem: null, fill: 0.7, fullBody: true, cropped: [] },
     ...overrides,
   };
 }
@@ -199,6 +200,64 @@ describe('PushupCounter', () => {
       c.update(awkward(70), t);
     }
     sweepAwkward(70, 170, 400);
+
+    expect(c.reps).toBe(1);
+  });
+
+  it('refuses to calibrate until the whole body is in frame', () => {
+    const c = new PushupCounter();
+    let t = 1000;
+
+    // Too close: the body runs off the bottom of the picture. Shoulders and
+    // elbows are perfectly readable, which is exactly why this used to look
+    // like it should work.
+    const cramped = (a: number) =>
+      metrics(a, {
+        framing: { problem: 'too-close', fill: 0.98, fullBody: false, cropped: ['bottom'] },
+      });
+
+    for (let i = 0; i < 60; i++) {
+      const u = c.update(cramped(170), t);
+      t += 33;
+      if (i > 40) {
+        expect(u.blockedBy).toBe('framing');
+        expect(u.coaching).toMatch(/move back/i);
+      }
+    }
+    expect(c.currentState).toBe('calibrating');
+    expect(c.reps).toBe(0);
+
+    // Step back and it calibrates, then counts normally.
+    t = hold(c, 170, t, cfg.calibrationHoldMs + 200).t;
+    expect(c.currentState).toBe('up');
+    doRep(c, t);
+    expect(c.reps).toBe(1);
+  });
+
+  it('does not abandon a set if a knee leaves the frame mid-rep', () => {
+    // Framing is a setup check, not a per-frame veto: losing a leg briefly
+    // while already counting must not throw the rep away.
+    const c = new PushupCounter();
+    let t = calibrate(c);
+
+    const lostLeg = (a: number) =>
+      metrics(a, {
+        framing: { problem: 'lower-body-missing', fill: 0.6, fullBody: false, cropped: [] },
+      });
+
+    const sweepLost = (from: number, to: number, ms: number) => {
+      const steps = Math.round(ms / 33);
+      for (let i = 1; i <= steps; i++) {
+        t += ms / steps;
+        c.update(lostLeg(from + ((to - from) * i) / steps), t);
+      }
+    };
+    sweepLost(170, 70, 400);
+    for (let i = 0; i < 4; i++) {
+      t += 33;
+      c.update(lostLeg(70), t);
+    }
+    sweepLost(70, 170, 400);
 
     expect(c.reps).toBe(1);
   });

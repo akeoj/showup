@@ -89,6 +89,78 @@ export function visible(lm: Landmark | undefined, min: number): boolean {
 
 export type CameraView = 'side' | 'facing' | 'upright';
 
+export type FramingProblem =
+  | 'no-person'
+  | 'too-close' // body runs past the edge of the frame
+  | 'lower-body-missing' // knees/ankles not in shot
+  | 'too-far' // person so small the landmarks get noisy
+  | null;
+
+export interface Framing {
+  problem: FramingProblem;
+  /** Fraction of the frame's diagonal the body spans. */
+  fill: number;
+  /** True when head through ankles are all inside the picture. */
+  fullBody: boolean;
+  /** Which edges the body runs past, if any. */
+  cropped: string[];
+}
+
+/** Landmarks that together mean "the whole body is in shot". */
+const FRAMING_POINTS = [0, 11, 12, 23, 24, 25, 26, 27, 28];
+
+/**
+ * Judge the shot before judging the push-up.
+ *
+ * Standing too close is the single most common setup mistake: the counter can
+ * still see shoulders and elbows, so it looks like it is working, but the legs
+ * are out of shot and the geometry it needs to tell a plank from a person
+ * standing up is simply missing. Saying "move back" is far more useful than
+ * silently refusing to count.
+ */
+export function computeFraming(landmarks: Landmark[], minVisibility: number): Framing {
+  if (!landmarks || landmarks.length < 29) {
+    return { problem: 'no-person', fill: 0, fullBody: false, cropped: [] };
+  }
+
+  const pts = FRAMING_POINTS.map((i) => landmarks[i]).filter(Boolean);
+  if (pts.length === 0) {
+    return { problem: 'no-person', fill: 0, fullBody: false, cropped: [] };
+  }
+
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+
+  // MediaPipe extrapolates past the frame, so coordinates outside 0..1 are a
+  // direct signal that part of the body is outside the picture.
+  const margin = 0.02;
+  const cropped: string[] = [];
+  if (minX < margin) cropped.push('left');
+  if (maxX > 1 - margin) cropped.push('right');
+  if (minY < margin) cropped.push('top');
+  if (maxY > 1 - margin) cropped.push('bottom');
+
+  const fill = Math.hypot(maxX - minX, maxY - minY) / Math.SQRT2;
+
+  const lowerBody = [25, 26, 27, 28]
+    .map((i) => landmarks[i])
+    .filter((p) => visible(p, minVisibility) && p.x > 0 && p.x < 1 && p.y > 0 && p.y < 1);
+  const hasLowerBody = lowerBody.length >= 2;
+
+  const fullBody = cropped.length === 0 && hasLowerBody;
+
+  let problem: FramingProblem = null;
+  if (cropped.length > 0) problem = 'too-close';
+  else if (!hasLowerBody) problem = 'lower-body-missing';
+  else if (fill < 0.3) problem = 'too-far';
+
+  return { problem, fill, fullBody, cropped };
+}
+
 export interface PoseMetrics {
   /** Elbow angle, from 3D world landmarks when available. */
   elbowAngle: number;
@@ -129,6 +201,8 @@ export interface PoseMetrics {
   hasVisibilityData: boolean;
   /** True when 3D world landmarks were available for the joint angles. */
   usedWorldLandmarks: boolean;
+  /** How well the shot is framed, judged separately from the movement. */
+  framing: Framing;
 }
 
 /**
@@ -290,6 +364,7 @@ export function computeMetrics(
     confidence: mean(confidences, 0),
     hasVisibilityData,
     usedWorldLandmarks: useWorld,
+    framing: computeFraming(landmarks, minVisibility),
   };
 }
 

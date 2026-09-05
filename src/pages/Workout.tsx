@@ -292,11 +292,13 @@ export function Workout() {
 
             <h1 className="text-2xl font-bold">Set up your phone</h1>
             <p className="mt-2 text-muted">
-              Prop the phone about 1–2 metres away, either beside you or straight in front, so your
-              shoulders and hips are in frame. Good light in front of you, not behind.
+              Prop the phone far enough back that your <strong className="text-text">whole body</strong>{' '}
+              fits in the picture, head to feet — usually 2–3 metres. Beside you or straight in
+              front both work. Good light on you, not behind you.
             </p>
 
             <ul className="mt-5 space-y-2 text-sm text-muted">
+              <li>📏 Whole body in frame — legs included, not just your top half</li>
               <li>📱 Beside you or in front — both work</li>
               <li>💡 Light on you, window in front rather than behind</li>
               <li>🔒 The video never leaves this phone — only your count is saved</li>
@@ -494,6 +496,8 @@ export function Workout() {
                 <dd>{ui.state}</dd>
                 <dt className="text-white/60">Counter</dt>
                 <dd>{ui.modelStatus}</dd>
+                <dt className="text-white/60">Whole body in frame</dt>
+                <dd>{ui.fullBody ? 'yes' : `no (${ui.framingProblem ?? '—'})`}</dd>
                 <dt className="text-white/60">Blocked by</dt>
                 <dd className="text-flame">{ui.blockedBy ?? 'nothing — counting'}</dd>
               </dl>
@@ -507,8 +511,49 @@ export function Workout() {
             </div>
           )}
 
+          {/* Framing: shown until the shot is right, then it gets out of the way. */}
+          {(ui.state === 'idle' || ui.state === 'calibrating') && (
+            <>
+              {/* Corner brackets marking the shot to fill. */}
+              <div className="pointer-events-none absolute inset-6 top-24 bottom-40">
+                {(
+                  [
+                    'left-0 top-0 border-l-2 border-t-2 rounded-tl-xl',
+                    'right-0 top-0 border-r-2 border-t-2 rounded-tr-xl',
+                    'left-0 bottom-0 border-l-2 border-b-2 rounded-bl-xl',
+                    'right-0 bottom-0 border-r-2 border-b-2 rounded-br-xl',
+                  ] as const
+                ).map((cls) => (
+                  <span
+                    key={cls}
+                    className={`absolute h-10 w-10 ${cls} ${
+                      ui.fullBody ? 'border-lime' : 'border-white/40'
+                    } transition-colors`}
+                  />
+                ))}
+              </div>
+
+              <div className="absolute inset-x-4 top-[16%] rounded-2xl bg-black/75 px-4 py-3 text-center text-sm text-white backdrop-blur">
+                {ui.framingProblem ? (
+                  <>
+                    <p className="font-medium">{ui.coaching}</p>
+                    <p className="mt-1 text-xs text-white/60">
+                      The counter needs your legs in shot to tell a push-up from standing up.
+                    </p>
+                  </>
+                ) : (
+                  <p className="font-medium text-lime">
+                    {ui.state === 'calibrating'
+                      ? 'Framing looks good — get into position and hold still'
+                      : 'Ready'}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+
           {/* Stuck for a while? Say what is blocking, without being asked. */}
-          {!showDiagnostics && stuckReason && (
+          {!showDiagnostics && stuckReason && ui.state !== 'calibrating' && ui.state !== 'idle' && (
             <button
               onClick={() => setShowDiagnostics(true)}
               className="absolute inset-x-4 top-[12%] rounded-2xl bg-black/75 px-4 py-3 text-left text-sm text-white backdrop-blur"
