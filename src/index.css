@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink text-text antialiased;
+    /* Notched phones: the workout screen goes edge to edge. */
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Big touch targets everywhere — this is used mid-push-up. */
+  button,
+  a[role='button'] {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  input,
+  select,
+  textarea {
+    /* Anything under 16px makes iOS Safari zoom the viewport on focus. */
+    font-size: 16px;
+  }
+
+  ::selection {
+    @apply bg-flame/40;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl2 border border-line bg-surface p-4;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-muted;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-line bg-surface2 px-4 py-3 text-text
+           placeholder:text-muted/60 focus:border-flame focus:outline-none focus:ring-2 focus:ring-flame/30;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes pop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
+.animate-pop {
+  animation: pop 260ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pop {
+    animation: none;
+  }
+}
