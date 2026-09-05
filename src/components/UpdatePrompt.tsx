@@ -14,11 +14,26 @@ export function UpdatePrompt() {
     updateServiceWorker,
   } = useRegisterSW({
     onRegisteredSW(_url, registration) {
-      // Check hourly rather than only on load: an installed PWA can stay open
-      // for days without ever navigating.
-      if (registration) {
-        setInterval(() => void registration.update().catch(() => undefined), 60 * 60 * 1000);
-      }
+      if (!registration) return;
+
+      let lastCheck = Date.now();
+      const check = () => {
+        lastCheck = Date.now();
+        void registration.update().catch(() => undefined);
+      };
+
+      // Hourly, for a session left open for days.
+      setInterval(check, 60 * 60 * 1000);
+
+      // And on resume. An installed app that sits in the background for a day
+      // and is then reopened would otherwise wait a full hour before noticing
+      // a deploy — which on iOS, where the app is resumed far more often than
+      // it is launched, is most of the time.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && Date.now() - lastCheck > 15 * 60 * 1000) {
+          check();
+        }
+      });
     },
     onRegisterError(err) {
       console.warn('[showup] service worker registration failed', err);
