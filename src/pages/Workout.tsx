@@ -144,6 +144,23 @@ export function Workout() {
     return () => void lock?.release().catch(() => undefined);
   }, [phase]);
 
+  // Only nag once it has clearly been stuck rather than merely settling.
+  const [stuckReason, setStuckReason] = useState<string | null>(null);
+  useEffect(() => {
+    if (phase !== 'live' || ui.reps > 0 || !ui.blockedBy || ui.blockedBy === 'calibrating') {
+      setStuckReason(null);
+      return;
+    }
+    const label: Record<string, string> = {
+      'no-person': "can't see anyone in frame",
+      'not-enough-joints': 'your shoulders, elbows and hips need to be in frame',
+      orientation: 'this does not look like a push-up position yet',
+      'body-not-straight': 'keep your hips in line with your shoulders',
+    };
+    const t = window.setTimeout(() => setStuckReason(label[ui.blockedBy!] ?? ui.blockedBy), 4000);
+    return () => window.clearTimeout(t);
+  }, [ui.blockedBy, ui.reps, phase]);
+
   const activity = challenge ? getActivity(challenge.activity_type) : null;
   const sessionTotal = alreadyToday + ui.reps;
   const remaining = challenge ? Math.max(0, challenge.daily_target - sessionTotal) : 0;
@@ -464,6 +481,11 @@ export function Workout() {
                       ? 'facing camera'
                       : 'upright — not a push-up position'}
                 </dd>
+                <dt className="text-white/60">Foreshortening</dt>
+                <dd className="tabular">
+                  {ui.foreshortening.toFixed(2)} (torso {ui.torsoRatio.toFixed(2)}, legs{' '}
+                  {Number.isFinite(ui.legRatio) ? ui.legRatio.toFixed(2) : '—'})
+                </dd>
                 <dt className="text-white/60">Elbow angle</dt>
                 <dd className="tabular">{Math.round(ui.elbowAngle)}°</dd>
                 <dt className="text-white/60">Body straightness</dt>
@@ -472,6 +494,8 @@ export function Workout() {
                 <dd>{ui.state}</dd>
                 <dt className="text-white/60">Counter</dt>
                 <dd>{ui.modelStatus}</dd>
+                <dt className="text-white/60">Blocked by</dt>
+                <dd className="text-flame">{ui.blockedBy ?? 'nothing — counting'}</dd>
               </dl>
               <p className="mt-2 text-white/50">
                 A rep needs the elbow angle to go above 150° then below 100° and back, taking more
@@ -481,6 +505,17 @@ export function Workout() {
                 Close
               </Button>
             </div>
+          )}
+
+          {/* Stuck for a while? Say what is blocking, without being asked. */}
+          {!showDiagnostics && stuckReason && (
+            <button
+              onClick={() => setShowDiagnostics(true)}
+              className="absolute inset-x-4 top-[12%] rounded-2xl bg-black/75 px-4 py-3 text-left text-sm text-white backdrop-blur"
+            >
+              <span className="font-medium">Not counting: {stuckReason}</span>
+              <span className="mt-0.5 block text-xs text-white/60">Tap for details</span>
+            </button>
           )}
 
           {/* Low frame rate — the counter will under-count here */}

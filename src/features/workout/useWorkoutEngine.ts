@@ -30,6 +30,10 @@ export interface WorkoutUiState {
   visibilityReported: boolean;
   view: 'side' | 'facing' | 'upright';
   torsoRatio: number;
+  legRatio: number;
+  foreshortening: number;
+  /** Which gate is currently stopping a rep from being counted. */
+  blockedBy: string | null;
 }
 
 const SKELETON: [number, number][] = [
@@ -71,6 +75,9 @@ export function useWorkoutEngine(
     visibilityReported: true,
     view: 'upright',
     torsoRatio: 2,
+    legRatio: 2,
+    foreshortening: 2,
+    blockedBy: null,
   });
 
   const counterRef = useRef<PushupCounter | null>(null);
@@ -198,6 +205,9 @@ export function useWorkoutEngine(
           visibilityReported: metrics?.hasVisibilityData ?? true,
           view: metrics?.view ?? 'upright',
           torsoRatio: metrics?.torsoRatio ?? 2,
+          legRatio: metrics?.legRatio ?? 2,
+          foreshortening: metrics?.foreshortening ?? 2,
+          blockedBy: update.blockedBy,
         };
         return next;
       });

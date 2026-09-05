@@ -29,7 +29,17 @@ export interface CounterUpdate {
   formWarning: string | null;
   smoothedElbowAngle: number;
   confidence: number;
+  /** Why no rep is being counted right now — drives the diagnostics readout. */
+  blockedBy: BlockReason | null;
 }
+
+export type BlockReason =
+  | 'no-person'
+  | 'not-enough-joints'
+  | 'orientation'
+  | 'body-not-straight'
+  | 'calibrating'
+  | 'none';
 
 interface RepAttempt {
   startedAt: number;
@@ -116,6 +126,7 @@ export class PushupCounter {
         formWarning: null,
         angle: 180,
         confidence: metrics?.confidence ?? 0,
+        blockedBy: metrics ? 'not-enough-joints' : 'no-person',
       });
     }
 
@@ -128,7 +139,7 @@ export class PushupCounter {
     // Requiring only the first is what forced people to clear a metre of floor
     // beside them.
     const sideOn = metrics.torsoTilt <= this.cfg.maxTorsoTiltFromHorizontal;
-    const facingCamera = metrics.torsoRatio <= this.cfg.maxTorsoForeshortening;
+    const facingCamera = metrics.foreshortening <= this.cfg.maxTorsoForeshortening;
     const orientationOk = sideOn || facingCamera;
     const straightOk = metrics.bodyStraightness >= this.cfg.minBodyStraightness;
     const positionValid = orientationOk && straightOk;
@@ -155,6 +166,7 @@ export class PushupCounter {
         formWarning: null,
         angle,
         confidence: metrics.confidence,
+        blockedBy: !orientationOk ? 'orientation' : 'body-not-straight',
       });
     }
 
@@ -190,6 +202,7 @@ export class PushupCounter {
         formWarning,
         angle,
         confidence: metrics.confidence,
+        blockedBy: 'calibrating',
       });
     }
 
@@ -327,6 +340,7 @@ export class PushupCounter {
     formWarning: string | null;
     angle: number;
     confidence: number;
+    blockedBy?: BlockReason | null;
   }): CounterUpdate {
     return {
       state: this.state,
@@ -338,6 +352,7 @@ export class PushupCounter {
       formWarning: args.formWarning,
       smoothedElbowAngle: args.angle,
       confidence: args.confidence,
+      blockedBy: args.blockedBy ?? null,
     };
   }
 }

@@ -11,6 +11,8 @@ function metrics(elbowAngle: number, overrides: Partial<PoseMetrics> = {}): Pose
     bodyStraightness: 175,
     torsoTilt: 10,
     torsoRatio: 1.8,
+    legRatio: 1.8,
+    foreshortening: 1.8,
     view: 'side',
     coverage: 1,
     confidence: 0.9,
@@ -25,7 +27,14 @@ function metrics(elbowAngle: number, overrides: Partial<PoseMetrics> = {}): Pose
  * near-vertical in the image and collapses to well under a shoulder width.
  */
 function facingMetrics(elbowAngle: number, overrides: Partial<PoseMetrics> = {}): PoseMetrics {
-  return metrics(elbowAngle, { torsoTilt: 82, torsoRatio: 0.6, view: 'facing', ...overrides });
+  return metrics(elbowAngle, {
+    torsoTilt: 82,
+    torsoRatio: 0.6,
+    legRatio: 0.5,
+    foreshortening: 0.5,
+    view: 'facing',
+    ...overrides,
+  });
 }
 
 /** Feed the same angle for a stretch of time, returning the final update. */
@@ -162,17 +171,49 @@ describe('PushupCounter', () => {
     expect(c.reps).toBe(1);
   });
 
+  it('counts front-on even when only the legs read as foreshortened', () => {
+    // A phone propped at an angle can leave the torso projecting long while
+    // the legs still collapse towards the lens. Judging on the torso alone
+    // rejected this; the minimum of the two accepts it.
+    const awkward = (a: number) =>
+      metrics(a, { torsoTilt: 78, torsoRatio: 1.6, legRatio: 0.5, foreshortening: 0.5 });
+
+    const c = new PushupCounter();
+    let t = 1000;
+    for (let i = 0; i < 40; i++) {
+      c.update(awkward(170), t);
+      t += 33;
+    }
+    expect(c.currentState).toBe('up');
+
+    const sweepAwkward = (from: number, to: number, ms: number) => {
+      const steps = Math.round(ms / 33);
+      for (let i = 1; i <= steps; i++) {
+        t += ms / steps;
+        c.update(awkward(from + ((to - from) * i) / steps), t);
+      }
+    };
+    sweepAwkward(170, 70, 400);
+    for (let i = 0; i < 4; i++) {
+      t += 33;
+      c.update(awkward(70), t);
+    }
+    sweepAwkward(70, 170, 400);
+
+    expect(c.reps).toBe(1);
+  });
+
   it('still rejects someone standing up bending their arms', () => {
     const c = new PushupCounter();
     let t = 1000;
     // Upright: torso vertical in the image AND a full torso length, which is
     // what separates standing from a plank pointed at the camera.
     for (let i = 0; i < 40; i++) {
-      c.update(metrics(170, { torsoTilt: 85, torsoRatio: 2.1 }), t);
+      c.update(metrics(170, { torsoTilt: 85, torsoRatio: 2.1, legRatio: 1.9, foreshortening: 1.9 }), t);
       t += 33;
     }
     for (let i = 0; i < 40; i++) {
-      c.update(metrics(70, { torsoTilt: 85, torsoRatio: 2.1 }), t);
+      c.update(metrics(70, { torsoTilt: 85, torsoRatio: 2.1, legRatio: 1.9, foreshortening: 1.9 }), t);
       t += 33;
     }
     expect(c.reps).toBe(0);
@@ -184,7 +225,7 @@ describe('PushupCounter', () => {
 
     // Standing: torso vertical AND full length, so neither framing applies.
     for (let i = 0; i < 40; i++) {
-      c.update(metrics(170, { torsoTilt: 85, torsoRatio: 2.1 }), t);
+      c.update(metrics(170, { torsoTilt: 85, torsoRatio: 2.1, legRatio: 1.9, foreshortening: 1.9 }), t);
       t += 33;
     }
     // An invalid body position never even reaches calibration.
@@ -192,7 +233,7 @@ describe('PushupCounter', () => {
 
     // Bending the arms while standing must not produce a rep.
     for (let i = 0; i < 20; i++) {
-      c.update(metrics(70, { torsoTilt: 85, torsoRatio: 2.1 }), t);
+      c.update(metrics(70, { torsoTilt: 85, torsoRatio: 2.1, legRatio: 1.9, foreshortening: 1.9 }), t);
       t += 33;
     }
     expect(c.reps).toBe(0);

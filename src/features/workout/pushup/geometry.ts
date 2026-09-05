@@ -21,13 +21,19 @@ export const LM = {
   RIGHT_ANKLE: 28,
 } as const;
 
+/**
+ * What must be in frame for the counter to work at all.
+ *
+ * Wrists are deliberately NOT here. With the phone in front of you your hands
+ * are the closest thing to the lens and the first thing cropped or occluded,
+ * and requiring them meant a front-on set produced no metrics whatsoever —
+ * the counter never saw a person, let alone a rep.
+ */
 export const REQUIRED_LANDMARKS = [
   LM.LEFT_SHOULDER,
   LM.RIGHT_SHOULDER,
   LM.LEFT_ELBOW,
   LM.RIGHT_ELBOW,
-  LM.LEFT_WRIST,
-  LM.RIGHT_WRIST,
   LM.LEFT_HIP,
   LM.RIGHT_HIP,
 ];
@@ -99,6 +105,20 @@ export interface PoseMetrics {
    * facing me" from "standing up bending their arms".
    */
   torsoRatio: number;
+  /**
+   * Hip-to-knee length ÷ shoulder width. The same question asked of the legs,
+   * so one awkward camera height cannot sink the judgement on its own.
+   */
+  legRatio: number;
+  /**
+   * The foreshortening actually used: the smaller of torso and leg ratios.
+   *
+   * Either one collapsing means the body points at the lens. Both stay long
+   * only when someone is genuinely upright — the case this exists to reject —
+   * so taking the minimum accepts more real push-ups without letting standing
+   * arm-bends through.
+   */
+  foreshortening: number;
   /** How the person is oriented relative to the camera. */
   view: CameraView;
   /** Share of required landmarks that met the visibility floor. */
@@ -186,7 +206,15 @@ export function computeMetrics(
       visible(elbow, minVisibility) &&
       visible(wrist, minVisibility);
 
-    if (armVisible) {
+    // With 3D world landmarks the model estimates occluded joints too, so an
+    // arm only needs its points to EXIST, not to be confidently visible. That
+    // is what makes a front-on set workable, where the wrists are routinely
+    // hidden behind the hands or cropped at the frame edge.
+    const armUsable = useWorld
+      ? !!(shoulder && elbow && wrist && world![s.shoulder] && world![s.elbow] && world![s.wrist])
+      : armVisible;
+
+    if (armUsable) {
       elbowAngles.push(
         useWorld
           ? angleDeg3D(world![s.shoulder], world![s.elbow], world![s.wrist])
@@ -229,11 +257,24 @@ export function computeMetrics(
     torsoRatio = shoulderWidth > 1e-4 ? torsoLength / shoulderWidth : 2;
   }
 
+  // The same measurement on the legs.
+  const lk = landmarks[LM.LEFT_KNEE];
+  const rk = landmarks[LM.RIGHT_KNEE];
+  let legRatio = Number.POSITIVE_INFINITY;
+  if (ls && rs && lh && rh && lk && rk) {
+    const shoulderWidth = Math.hypot(ls.x - rs.x, ls.y - rs.y);
+    const hipMid = midpoint(lh, rh);
+    const kneeMid = midpoint(lk, rk);
+    const legLength = Math.hypot(hipMid.x - kneeMid.x, hipMid.y - kneeMid.y);
+    if (shoulderWidth > 1e-4) legRatio = legLength / shoulderWidth;
+  }
+
+  const foreshortening = Math.min(torsoRatio, legRatio);
   const torsoTilt = mean(tilts, 0);
 
-  // Side-on: the torso lies across the frame. Facing: the torso is pointed at
-  // the lens and collapses. Anything else is someone upright.
-  const view: CameraView = torsoTilt <= 55 ? 'side' : torsoRatio <= 1.15 ? 'facing' : 'upright';
+  // Side-on: the body lies across the frame. Facing: it points at the lens and
+  // collapses. Anything else is someone upright.
+  const view: CameraView = torsoTilt <= 55 ? 'side' : foreshortening <= 1.15 ? 'facing' : 'upright';
 
   return {
     elbowAngle: mean(elbowAngles, 180),
@@ -242,6 +283,8 @@ export function computeMetrics(
     bodyStraightness: mean(straightness, 180),
     torsoTilt,
     torsoRatio,
+    legRatio,
+    foreshortening,
     view,
     coverage,
     confidence: mean(confidences, 0),
