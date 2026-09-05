@@ -123,9 +123,15 @@ export class PushupCounter {
     const angle = this.smoother.push(metrics.elbowAngle);
 
     // --- Body position ------------------------------------------------------
-    const tiltOk = metrics.torsoTilt <= this.cfg.maxTorsoTiltFromHorizontal;
+    // Two acceptable framings, not one: lying across the frame (phone to your
+    // side) or pointed at the lens (phone in front of you, torso foreshortened).
+    // Requiring only the first is what forced people to clear a metre of floor
+    // beside them.
+    const sideOn = metrics.torsoTilt <= this.cfg.maxTorsoTiltFromHorizontal;
+    const facingCamera = metrics.torsoRatio <= this.cfg.maxTorsoForeshortening;
+    const orientationOk = sideOn || facingCamera;
     const straightOk = metrics.bodyStraightness >= this.cfg.minBodyStraightness;
-    const positionValid = tiltOk && straightOk;
+    const positionValid = orientationOk && straightOk;
 
     const formWarning =
       metrics.bodyStraightness < this.cfg.bodyStraightnessWarnAt && straightOk
@@ -143,8 +149,8 @@ export class PushupCounter {
         repCounted: false,
         rejected: null,
         depth: 0,
-        coaching: !tiltOk
-          ? 'Get into a push-up position with the phone to your side.'
+        coaching: !orientationOk
+          ? 'Get into a push-up position — the phone can be beside you or in front of you.'
           : 'Straighten your body — hips level with your shoulders.',
         formWarning: null,
         angle,

@@ -7,6 +7,7 @@ import { useChallenge, useTodayCount } from '@/features/challenges/hooks';
 import { useCamera } from '@/features/workout/camera/useCamera';
 import { useWorkoutEngine } from '@/features/workout/useWorkoutEngine';
 import { rejectionHint } from '@/features/workout/pushup/stateMachine';
+import { LENIENT_PUSHUP_CONFIG } from '@/features/workout/pushup/config';
 import { getActivity } from '@/lib/activities';
 import { clearActiveWorkout, getActiveWorkout, saveActiveWorkout } from '@/lib/appMemory';
 import { useAppStore } from '@/store/appStore';
@@ -28,6 +29,8 @@ export function Workout() {
   const [noFrames, setNoFrames] = useState(false);
   const [slow, setSlow] = useState(false);
   const [slowDismissed, setSlowDismissed] = useState(false);
+  const [lenient, setLenient] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const slowTicks = useRef(0);
 
   const baseRef = useRef(0);
@@ -47,9 +50,18 @@ export function Workout() {
   );
 
   const camera = useCamera(videoRef);
-  const { ui, start, pause, resume, stop, adjustReps } = useWorkoutEngine(videoRef, canvasRef, {
-    onRep: persistRep,
-  });
+  const { ui, start, preload, pause, resume, stop, adjustReps } = useWorkoutEngine(
+    videoRef,
+    canvasRef,
+    { onRep: persistRep, config: lenient ? LENIENT_PUSHUP_CONFIG : undefined },
+  );
+
+  // Fetch the model the moment this screen opens. A download failure then
+  // shows up here, with an explanation and a retry, instead of after the
+  // camera is live where it is indistinguishable from a broken counter.
+  useEffect(() => {
+    void preload();
+  }, [preload]);
 
   useEffect(() => setPopKey((k) => k + 1), [ui.reps]);
   useEffect(() => stop, [stop]);
@@ -123,10 +135,16 @@ export function Workout() {
 
   const begin = async (seed = 0) => {
     if (!challenge) return;
+
+    // Never go live with a counter that cannot count — that is precisely the
+    // silent failure this screen used to have.
+    const counterReady = await start(seed);
+    if (!counterReady) return;
+
     const ok = await camera.start('user');
     if (!ok) return;
+
     baseRef.current = alreadyToday;
-    await start(seed);
     if (seed > 0) persistRep(seed);
     setPhase('live');
     // The element is already mounted, but re-binding after the phase switch
@@ -231,12 +249,12 @@ export function Workout() {
 
             <h1 className="text-2xl font-bold">Set up your phone</h1>
             <p className="mt-2 text-muted">
-              Prop the phone on its side about 1–2 metres away, so your head, shoulders and hips are
-              all in frame. Good light in front of you, not behind.
+              Prop the phone about 1–2 metres away, either beside you or straight in front, so your
+              shoulders and hips are in frame. Good light in front of you, not behind.
             </p>
 
             <ul className="mt-5 space-y-2 text-sm text-muted">
-              <li>📱 Phone to your side, not in front of your head</li>
+              <li>📱 Beside you or in front — both work</li>
               <li>💡 Light on you, window in front rather than behind</li>
               <li>🔒 The video never leaves this phone — only your count is saved</li>
             </ul>
@@ -262,11 +280,38 @@ export function Workout() {
               </div>
             )}
 
+            {ui.modelStatus === 'loading' && (
+              <p className="mt-5 text-sm text-muted">
+                Downloading the rep counter (about 15MB, once)… it is cached after this, and works
+                offline afterwards.
+              </p>
+            )}
+
             {ui.modelStatus === 'error' && (
-              <div className="card mt-3 border-red-500/40 bg-red-500/10 text-sm">
-                {ui.modelError}
+              <div className="card mt-5 border-red-500/40 bg-red-500/10 text-sm">
+                <p className="font-medium">The rep counter could not load.</p>
+                <p className="mt-1 text-muted">
+                  It downloads once from an external host; a blocked or very slow connection stops
+                  it. Without it the camera cannot count. {ui.modelError}
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <Button variant="secondary" onClick={() => void preload()}>
+                    Try again
+                  </Button>
+                  <Button onClick={() => setManualOpen(true)}>Count it myself</Button>
+                </div>
               </div>
             )}
+
+            <label className="mt-5 flex items-center gap-3 text-sm text-muted">
+              <input
+                type="checkbox"
+                checked={lenient}
+                onChange={(e) => setLenient(e.target.checked)}
+                className="h-5 w-5 accent-[#FF6B35]"
+              />
+              Counting missing reps? Use relaxed detection
+            </label>
           </div>
 
           <div className="space-y-2 pt-6">
@@ -274,6 +319,7 @@ export function Workout() {
               full
               onClick={() => void begin(0)}
               loading={camera.status === 'requesting' || ui.modelStatus === 'loading'}
+              disabled={ui.modelStatus === 'error'}
             >
               {ui.modelStatus === 'loading' ? 'Loading counter…' : 'Start workout'}
             </Button>
@@ -303,9 +349,13 @@ export function Workout() {
               >
                 Flip
               </button>
-              <span className="rounded-full bg-black/40 px-3 py-1.5 text-xs text-white/70 backdrop-blur tabular">
+              <button
+                onClick={() => setShowDiagnostics((v) => !v)}
+                aria-label="Counter diagnostics"
+                className="rounded-full bg-black/40 px-3 py-1.5 text-xs text-white/70 backdrop-blur tabular"
+              >
                 {ui.fps} fps · {ui.delegate}
-              </span>
+              </button>
             </div>
           </div>
 
@@ -334,6 +384,42 @@ export function Workout() {
                 </Button>
                 <Button onClick={() => setManualOpen(true)}>Count it myself</Button>
               </div>
+            </div>
+          )}
+
+          {/* Why isn't it counting? — tap the fps chip */}
+          {showDiagnostics && (
+            <div className="absolute inset-x-4 top-[12%] rounded-2xl bg-black/85 p-4 text-xs text-white backdrop-blur">
+              <p className="mb-2 text-sm font-medium">What the counter sees</p>
+              <dl className="grid grid-cols-2 gap-y-1">
+                <dt className="text-white/60">Person detected</dt>
+                <dd>{ui.detected ? 'yes' : 'no'}</dd>
+                <dt className="text-white/60">Joints in frame</dt>
+                <dd>{Math.round(ui.coverage * 100)}%</dd>
+                <dt className="text-white/60">Framing</dt>
+                <dd>
+                  {ui.view === 'side'
+                    ? 'side-on'
+                    : ui.view === 'facing'
+                      ? 'facing camera'
+                      : 'upright — not a push-up position'}
+                </dd>
+                <dt className="text-white/60">Elbow angle</dt>
+                <dd className="tabular">{Math.round(ui.elbowAngle)}°</dd>
+                <dt className="text-white/60">Body straightness</dt>
+                <dd className="tabular">{Math.round(ui.straightness)}°</dd>
+                <dt className="text-white/60">State</dt>
+                <dd>{ui.state}</dd>
+                <dt className="text-white/60">Counter</dt>
+                <dd>{ui.modelStatus}</dd>
+              </dl>
+              <p className="mt-2 text-white/50">
+                A rep needs the elbow angle to go above 150° then below 100° and back, taking more
+                than half a second.
+              </p>
+              <Button variant="secondary" full className="mt-3" onClick={() => setShowDiagnostics(false)}>
+                Close
+              </Button>
             </div>
           )}
 

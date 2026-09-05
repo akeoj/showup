@@ -10,10 +10,22 @@ function metrics(elbowAngle: number, overrides: Partial<PoseMetrics> = {}): Pose
     elbowAngle,
     bodyStraightness: 175,
     torsoTilt: 10,
+    torsoRatio: 1.8,
+    view: 'side',
     coverage: 1,
     confidence: 0.9,
+    hasVisibilityData: true,
+    usedWorldLandmarks: true,
     ...overrides,
   };
+}
+
+/**
+ * Phone in front of the user: the torso points at the lens, so it reads as
+ * near-vertical in the image and collapses to well under a shoulder width.
+ */
+function facingMetrics(elbowAngle: number, overrides: Partial<PoseMetrics> = {}): PoseMetrics {
+  return metrics(elbowAngle, { torsoTilt: 82, torsoRatio: 0.6, view: 'facing', ...overrides });
 }
 
 /** Feed the same angle for a stretch of time, returning the final update. */
@@ -121,13 +133,58 @@ describe('PushupCounter', () => {
     expect(c.reps).toBe(0);
   });
 
+  it('counts with the phone in front of the user, not just side-on', () => {
+    const c = new PushupCounter();
+    // Calibrate using facing-camera geometry only.
+    let t = 1000;
+    for (let i = 0; i < 40; i++) {
+      c.update(facingMetrics(170), t);
+      t += 33;
+    }
+    expect(c.currentState).toBe('up');
+
+    // One clean rep, all frames front-on.
+    let tt = t;
+    const sweepFacing = (a: number, b: number, ms: number, step = 33) => {
+      const steps = Math.max(1, Math.round(ms / step));
+      for (let i = 1; i <= steps; i++) {
+        tt += ms / steps;
+        c.update(facingMetrics(a + ((b - a) * i) / steps), tt);
+      }
+    };
+    sweepFacing(170, 70, 400);
+    for (let i = 0; i < 4; i++) {
+      tt += 33;
+      c.update(facingMetrics(70), tt);
+    }
+    sweepFacing(70, 170, 400);
+
+    expect(c.reps).toBe(1);
+  });
+
+  it('still rejects someone standing up bending their arms', () => {
+    const c = new PushupCounter();
+    let t = 1000;
+    // Upright: torso vertical in the image AND a full torso length, which is
+    // what separates standing from a plank pointed at the camera.
+    for (let i = 0; i < 40; i++) {
+      c.update(metrics(170, { torsoTilt: 85, torsoRatio: 2.1 }), t);
+      t += 33;
+    }
+    for (let i = 0; i < 40; i++) {
+      c.update(metrics(70, { torsoTilt: 85, torsoRatio: 2.1 }), t);
+      t += 33;
+    }
+    expect(c.reps).toBe(0);
+  });
+
   it('does not count while the body is not in a push-up position', () => {
     const c = new PushupCounter();
     let t = 1000;
 
-    // Standing: torso vertical, so torsoTilt is high.
+    // Standing: torso vertical AND full length, so neither framing applies.
     for (let i = 0; i < 40; i++) {
-      c.update(metrics(170, { torsoTilt: 85 }), t);
+      c.update(metrics(170, { torsoTilt: 85, torsoRatio: 2.1 }), t);
       t += 33;
     }
     // An invalid body position never even reaches calibration.
@@ -135,7 +192,7 @@ describe('PushupCounter', () => {
 
     // Bending the arms while standing must not produce a rep.
     for (let i = 0; i < 20; i++) {
-      c.update(metrics(70, { torsoTilt: 85 }), t);
+      c.update(metrics(70, { torsoTilt: 85, torsoRatio: 2.1 }), t);
       t += 33;
     }
     expect(c.reps).toBe(0);

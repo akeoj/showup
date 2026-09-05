@@ -70,4 +70,16 @@ export function firstPose(result: PoseLandmarkerResult | undefined): Landmark[] 
   return lm && lm.length ? (lm as Landmark[]) : null;
 }
 
+/**
+ * Metric 3D landmarks for the same frame, origin at the hips.
+ *
+ * Joint angles taken from these are independent of where the camera is, which
+ * is what makes a front-on phone work: a 2D elbow angle measured on a
+ * projection reads far too straight when the arm points at the lens.
+ */
+export function firstWorldPose(result: PoseLandmarkerResult | undefined): Landmark[] | null {
+  const lm = result?.worldLandmarks?.[0];
+  return lm && lm.length ? (lm as unknown as Landmark[]) : null;
+}
+
 export { PoseLandmarker };

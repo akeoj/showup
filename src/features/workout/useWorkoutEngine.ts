@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { firstPose, getDelegate, loadPoseLandmarker, type PoseLandmarker } from './pose/poseEngine';
+import {
+  firstPose,
+  firstWorldPose,
+  getDelegate,
+  loadPoseLandmarker,
+  type PoseLandmarker,
+} from './pose/poseEngine';
 import { computeMetrics, type Landmark } from './pushup/geometry';
 import { PushupCounter, type CounterState, type RejectReason } from './pushup/stateMachine';
 import { DEFAULT_PUSHUP_CONFIG, type PushupConfig } from './pushup/config';
@@ -15,6 +21,15 @@ export interface WorkoutUiState {
   modelStatus: 'idle' | 'loading' | 'ready' | 'error';
   modelError: string | null;
   delegate: 'GPU' | 'CPU';
+  /** Live diagnostics — what the counter can actually see right now. */
+  detected: boolean;
+  coverage: number;
+  elbowAngle: number;
+  torsoTilt: number;
+  straightness: number;
+  visibilityReported: boolean;
+  view: 'side' | 'facing' | 'upright';
+  torsoRatio: number;
 }
 
 const SKELETON: [number, number][] = [
@@ -48,6 +63,14 @@ export function useWorkoutEngine(
     modelStatus: 'idle',
     modelError: null,
     delegate: 'GPU',
+    detected: false,
+    coverage: 0,
+    elbowAngle: 180,
+    torsoTilt: 0,
+    straightness: 180,
+    visibilityReported: true,
+    view: 'upright',
+    torsoRatio: 2,
   });
 
   const counterRef = useRef<PushupCounter | null>(null);
@@ -126,15 +149,18 @@ export function useWorkoutEngine(
 
     const now = performance.now();
     let landmarks: Landmark[] | null = null;
+    let world: Landmark[] | null = null;
 
     try {
-      landmarks = firstPose(landmarker.detectForVideo(video, now));
+      const result = landmarker.detectForVideo(video, now);
+      landmarks = firstPose(result);
+      world = firstWorldPose(result);
     } catch (err) {
       console.warn('[showup] inference failed', err);
       return;
     }
 
-    const metrics = landmarks ? computeMetrics(landmarks, cfg.minVisibility) : null;
+    const metrics = landmarks ? computeMetrics(landmarks, cfg.minVisibility, world) : null;
     const update = counter.update(metrics, now);
     draw(landmarks, video);
 
@@ -164,6 +190,14 @@ export function useWorkoutEngine(
           depth: update.depth,
           lastRejection: update.rejected ?? (repEvent ? null : prev.lastRejection),
           fps: fps ?? prev.fps,
+          detected: !!metrics,
+          coverage: metrics?.coverage ?? 0,
+          elbowAngle: update.smoothedElbowAngle,
+          torsoTilt: metrics?.torsoTilt ?? 0,
+          straightness: metrics?.bodyStraightness ?? 180,
+          visibilityReported: metrics?.hasVisibilityData ?? true,
+          view: metrics?.view ?? 'upright',
+          torsoRatio: metrics?.torsoRatio ?? 2,
         };
         return next;
       });
@@ -176,7 +210,7 @@ export function useWorkoutEngine(
   }, [cfg.minVisibility, draw, videoRef]);
 
   const start = useCallback(
-    async (seedReps = 0) => {
+    async (seedReps = 0): Promise<boolean> => {
       setUi((s) => ({ ...s, modelStatus: 'loading', modelError: null }));
       try {
         const landmarker = await loadPoseLandmarker();
@@ -200,6 +234,7 @@ export function useWorkoutEngine(
           state: 'idle',
         }));
         rafRef.current = requestAnimationFrame(loop);
+        return true;
       } catch (err) {
         setUi((s) => ({
           ...s,
@@ -207,12 +242,40 @@ export function useWorkoutEngine(
           modelError:
             err instanceof Error
               ? err.message
-              : 'Could not load the pose model. Check your connection and try again.',
+              : 'Could not load the counter. Check your connection and try again.',
         }));
+        return false;
       }
     },
     [cfg, loop],
   );
+
+  /**
+   * Fetch the model without starting the camera.
+   *
+   * Called as soon as the workout screen opens so a download failure surfaces
+   * on the setup screen, where it can be explained — rather than after the
+   * camera is live, where it looked exactly like a counter that just does not
+   * count.
+   */
+  const preload = useCallback(async (): Promise<boolean> => {
+    setUi((s) => (s.modelStatus === 'ready' ? s : { ...s, modelStatus: 'loading', modelError: null }));
+    try {
+      landmarkerRef.current = await loadPoseLandmarker();
+      setUi((s) => ({ ...s, modelStatus: 'ready', modelError: null, delegate: getDelegate() }));
+      return true;
+    } catch (err) {
+      setUi((s) => ({
+        ...s,
+        modelStatus: 'error',
+        modelError:
+          err instanceof Error
+            ? err.message
+            : 'Could not load the counter. Check your connection and try again.',
+      }));
+      return false;
+    }
+  }, []);
 
   const pause = useCallback(() => {
     pausedRef.current = true;
@@ -258,5 +321,5 @@ export function useWorkoutEngine(
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [pause, resume]);
 
-  return { ui, start, pause, resume, stop, adjustReps, isPaused: () => pausedRef.current };
+  return { ui, start, preload, pause, resume, stop, adjustReps, isPaused: () => pausedRef.current };
 }

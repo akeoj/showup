@@ -25,8 +25,21 @@ export interface PushupConfig {
   /** Dead time after a counted rep before another can start. */
   cooldownMs: number;
 
-  /** Torso must be within this many degrees of horizontal (side view). */
+  /**
+   * Side-on framing: torso must be within this many degrees of horizontal.
+   * Only one of this and maxTorsoForeshortening has to pass — see below.
+   */
   maxTorsoTiltFromHorizontal: number;
+  /**
+   * Front-on framing: torso length ÷ shoulder width in the image.
+   *
+   * Facing the camera foreshortens the torso towards ~0.5, while standing
+   * upright sits nearer 1.5–2.5. Accepting either a horizontal torso OR a
+   * strongly foreshortened one is what lets the phone sit in front of the
+   * user instead of demanding a clear metre to their side — while still
+   * rejecting someone stood up flapping their arms.
+   */
+  maxTorsoForeshortening: number;
   /** Hip angle (shoulder-hip-knee); a sagging or piked body is rejected. */
   minBodyStraightness: number;
   /** How far the body may deviate before we warn but still count. */
@@ -56,6 +69,7 @@ export const DEFAULT_PUSHUP_CONFIG: PushupConfig = {
   cooldownMs: 250,
 
   maxTorsoTiltFromHorizontal: 55,
+  maxTorsoForeshortening: 1.15,
   minBodyStraightness: 130,
   bodyStraightnessWarnAt: 150,
 
@@ -77,5 +91,6 @@ export const LENIENT_PUSHUP_CONFIG: PushupConfig = {
   minRangeOfMotion: 35,
   minVisibility: 0.4,
   maxTorsoTiltFromHorizontal: 70,
+  maxTorsoForeshortening: 1.35,
   minBodyStraightness: 115,
 };
