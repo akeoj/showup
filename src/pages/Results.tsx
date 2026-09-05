@@ -2,6 +2,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '@/components/AppShell';
 import { Button } from '@/components/Button';
 import { ProgressBar } from '@/components/ProgressBar';
+import { VideoResult } from '@/components/VideoResult';
 import { useChallenge, useLeaderboard, useSyncStatus } from '@/features/challenges/hooks';
 import { useAppStore } from '@/store/appStore';
 
@@ -10,6 +11,8 @@ export function Results() {
   const navigate = useNavigate();
   const { challenge } = useChallenge(id);
   const result = useAppStore((s) => s.lastResult);
+  const clip = useAppStore((s) => s.lastClip);
+  const setLastClip = useAppStore((s) => s.setLastClip);
   const userId = useAppStore((s) => s.userId);
   const { rows } = useLeaderboard(challenge);
   const sync = useSyncStatus();
@@ -54,6 +57,15 @@ export function Results() {
               : `${remaining.toLocaleString()} ${challenge.unit} left to complete today.`}
           </p>
         </div>
+
+        {clip && (
+          <VideoResult
+            clip={clip}
+            challengeName={challenge.name}
+            reps={result.count}
+            onDiscard={() => setLastClip(null)}
+          />
+        )}
 
         {me && me.current_streak > 0 && (
           <p className="text-lg">

@@ -6,6 +6,7 @@ import { recordWorkout } from '@/features/challenges/api';
 import { useChallenge, useTodayCount } from '@/features/challenges/hooks';
 import { useCamera } from '@/features/workout/camera/useCamera';
 import { useWorkoutEngine } from '@/features/workout/useWorkoutEngine';
+import { useRecorder } from '@/features/workout/recording/useRecorder';
 import { rejectionHint } from '@/features/workout/pushup/stateMachine';
 import { LENIENT_PUSHUP_CONFIG } from '@/features/workout/pushup/config';
 import { getActivity } from '@/lib/activities';
@@ -18,6 +19,7 @@ export function Workout() {
   const { challenge } = useChallenge(id);
   const { count: alreadyToday, today, reload } = useTodayCount(challenge);
   const setLastResult = useAppStore((s) => s.setLastResult);
+  const setLastClip = useAppStore((s) => s.setLastClip);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -56,6 +58,8 @@ export function Workout() {
     { onRep: persistRep, config: lenient ? LENIENT_PUSHUP_CONFIG : undefined },
   );
 
+  const recorder = useRecorder(videoRef);
+
   // Fetch the model the moment this screen opens. A download failure then
   // shows up here, with an explanation and a retry, instead of after the
   // camera is live where it is indistinguishable from a broken counter.
@@ -64,6 +68,18 @@ export function Workout() {
   }, [preload]);
 
   useEffect(() => setPopKey((k) => k + 1), [ui.reps]);
+
+  // Feed the recorder the numbers it burns into the frame. Ref-based, so this
+  // costs nothing per frame and never triggers a render.
+  useEffect(() => {
+    if (!challenge) return;
+    recorder.setOverlay({
+      reps: ui.reps,
+      unit: challenge.unit,
+      challengeName: challenge.name,
+      targetLine: `${alreadyToday + ui.reps} / ${challenge.daily_target} today`,
+    });
+  }, [ui.reps, challenge, alreadyToday, recorder]);
   useEffect(() => stop, [stop]);
 
   useEffect(() => {
@@ -156,6 +172,12 @@ export function Workout() {
     if (!challenge) return;
     setPhase('saving');
     pause();
+
+    // Stop the recorder BEFORE the camera, or the last second of frames is lost.
+    if (recorder.status === 'recording') {
+      const clip = await recorder.stop();
+      if (clip) setLastClip(clip);
+    }
     camera.stop();
 
     await recordWorkout({
@@ -193,6 +215,10 @@ export function Workout() {
   const abandon = async () => {
     if (!challenge) return;
     stop();
+    if (recorder.status === 'recording') {
+      const clip = await recorder.stop();
+      if (clip) setLastClip(clip);
+    }
     camera.stop();
     // Anything counted still belongs to the participant, so it is banked
     // rather than dropped — stopping means "stop counting", not "delete my reps".
@@ -257,6 +283,7 @@ export function Workout() {
               <li>📱 Beside you or in front — both work</li>
               <li>💡 Light on you, window in front rather than behind</li>
               <li>🔒 The video never leaves this phone — only your count is saved</li>
+              <li>🎥 Tap Record during the set to keep a clip with your count on it</li>
             </ul>
 
             {resumable !== null && (
@@ -342,6 +369,39 @@ export function Workout() {
               Done for now
             </button>
             <div className="flex items-center gap-2">
+              {recorder.status !== 'unsupported' && (
+                <button
+                  onClick={() => {
+                    if (recorder.status === 'recording') {
+                      void recorder.stop().then((clip) => clip && setLastClip(clip));
+                    } else {
+                      recorder.start({
+                        reps: ui.reps,
+                        unit: challenge.unit,
+                        challengeName: challenge.name,
+                        targetLine: `${sessionTotal} / ${challenge.daily_target} today`,
+                      });
+                    }
+                  }}
+                  aria-label={recorder.status === 'recording' ? 'Stop recording' : 'Record this set'}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs backdrop-blur ${
+                    recorder.status === 'recording'
+                      ? 'bg-red-600/80 text-white'
+                      : 'bg-black/40 text-white/80'
+                  }`}
+                >
+                  <span
+                    className={`h-2.5 w-2.5 rounded-full ${
+                      recorder.status === 'recording' ? 'animate-pulse bg-white' : 'bg-red-500'
+                    }`}
+                  />
+                  {recorder.status === 'recording'
+                    ? `${Math.floor(recorder.elapsedMs / 60000)}:${String(
+                        Math.floor((recorder.elapsedMs % 60000) / 1000),
+                      ).padStart(2, '0')}`
+                    : 'Record'}
+                </button>
+              )}
               <button
                 onClick={() => void camera.flip()}
                 aria-label="Switch camera"

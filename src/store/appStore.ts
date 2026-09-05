@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { getLocalNickname, setLocalNickname } from '@/lib/db';
 import { currentUserId, ensureSession, wasIdentityReset } from '@/lib/supabase';
 import { recordWorkout, restoreAfterIdentityReset } from '@/features/challenges/api';
+import type { RecordedClip } from '@/features/workout/recording/useRecorder';
 import {
   clearActiveWorkout,
   getActiveWorkout,
@@ -28,9 +29,16 @@ interface AppState {
   recoveredReps: number | null;
   /** Carried from the workout screen to the results screen — and across a kill. */
   lastResult: WorkoutResult | null;
+  /**
+   * The recorded clip, in memory only. Deliberately not persisted: the video
+   * belongs to the participant's phone, not to this app's storage, so it is
+   * offered for saving or sharing immediately and never filed anywhere.
+   */
+  lastClip: RecordedClip | null;
   init: () => Promise<void>;
   setNickname: (n: string) => Promise<void>;
   setLastResult: (r: WorkoutResult | null) => void;
+  setLastClip: (c: RecordedClip | null) => void;
   dismissRestored: () => void;
   dismissRecovered: () => void;
 }
@@ -43,6 +51,7 @@ export const useAppStore = create<AppState>((set) => ({
   restored: null,
   recoveredReps: null,
   lastResult: null,
+  lastClip: null,
 
   init: async () => {
     const [nickname, cachedId, storedResult] = await Promise.all([
@@ -110,6 +119,15 @@ export const useAppStore = create<AppState>((set) => ({
     set({ lastResult: r });
     if (r) void saveLastResult(r);
   },
+
+  setLastClip: (c) =>
+    set((state) => {
+      // Release the previous object URL rather than leaking it for the session.
+      if (state.lastClip && state.lastClip.url !== c?.url) {
+        URL.revokeObjectURL(state.lastClip.url);
+      }
+      return { lastClip: c };
+    }),
 
   dismissRestored: () => set({ restored: null }),
   dismissRecovered: () => set({ recoveredReps: null }),
