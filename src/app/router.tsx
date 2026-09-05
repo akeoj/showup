@@ -7,6 +7,7 @@ import { JoinChallenge } from '@/pages/JoinChallenge';
 import { Explore } from '@/pages/Explore';
 import { ChallengePage } from '@/pages/Challenge';
 import { Results } from '@/pages/Results';
+import { Timer } from '@/pages/Timer';
 import { LeaderboardPage } from '@/pages/LeaderboardPage';
 import { Manage } from '@/pages/Manage';
 
@@ -36,6 +37,7 @@ const router = createBrowserRouter([
           </Suspense>
         ),
       },
+      { path: '/challenge/:id/timer', element: <Timer /> },
       { path: '/challenge/:id/results', element: <Results /> },
       { path: '/challenge/:id/leaderboard', element: <LeaderboardPage /> },
       { path: '/challenge/:id/manage', element: <Manage /> },

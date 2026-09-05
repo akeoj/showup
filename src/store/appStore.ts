@@ -4,11 +4,16 @@ import { currentUserId, ensureSession, wasIdentityReset } from '@/lib/supabase';
 import { recordWorkout, restoreAfterIdentityReset } from '@/features/challenges/api';
 import type { RecordedClip } from '@/features/workout/recording/useRecorder';
 import {
+  clearActiveTimer,
   clearActiveWorkout,
+  getActiveTimer,
   getActiveWorkout,
   getLastResult,
   saveLastResult,
+  timerElapsedSec,
 } from '@/lib/appMemory';
+import { getChallengeCached } from '@/features/challenges/api';
+import { getActivity } from '@/lib/activities';
 
 export interface WorkoutResult {
   challengeId: string;
@@ -92,6 +97,29 @@ export const useAppStore = create<AppState>((set) => ({
       });
       await clearActiveWorkout();
       set({ recoveredReps: active.reps });
+    })();
+
+    // A timer left running for hours — the app was killed, or they forgot.
+    // Bank what it measured rather than discarding it, then clear it so the
+    // next session starts clean.
+    void (async () => {
+      const t = await getActiveTimer();
+      if (!t) return;
+      const stale = Date.now() - t.updatedAt > 6 * 60 * 60 * 1000;
+      if (!stale) return;
+
+      const challenge = await getChallengeCached(t.challengeId);
+      const perUnitSec = challenge && getActivity(challenge.activity_type).unit === 'seconds' ? 1 : 60;
+      const earned = Math.floor(timerElapsedSec(t, t.updatedAt) / perUnitSec);
+      if (earned > 0) {
+        await recordWorkout({
+          challengeId: t.challengeId,
+          date: t.date,
+          count: t.base + earned,
+          source: 'timer',
+        });
+      }
+      await clearActiveTimer();
     })();
 
     void ensureSession().then(async (id) => {

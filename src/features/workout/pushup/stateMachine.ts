@@ -66,6 +66,7 @@ export class PushupCounter {
   private attempt: RepAttempt | null = null;
 
   private validSince: number | null = null;
+  private invalidSince: number | null = null;
   private lastValidAt: number | null = null;
   private lastRepAt = 0;
   private lastAboveUpAt = 0;
@@ -95,6 +96,7 @@ export class PushupCounter {
     this.repsCount = 0;
     this.attempt = null;
     this.validSince = null;
+    this.invalidSince = null;
     this.lastValidAt = null;
     this.lastRepAt = 0;
     this.topAngleSeen = 180;
@@ -132,7 +134,16 @@ export class PushupCounter {
     }
 
     this.lastValidAt = now;
-    const angle = this.smoother.push(metrics.elbowAngle);
+
+    // Which joint drives a rep is a property of the exercise, not of this
+    // class: elbow for push-ups, knee for squats, hip for sit-ups.
+    const rawAngle =
+      this.cfg.repAngle === 'knee'
+        ? metrics.kneeAngle
+        : this.cfg.repAngle === 'hip'
+          ? metrics.hipAngle
+          : metrics.elbowAngle;
+    const angle = this.smoother.push(rawAngle);
 
     // --- Body position ------------------------------------------------------
     // Two acceptable framings, not one: lying across the frame (phone to your
@@ -141,19 +152,41 @@ export class PushupCounter {
     // beside them.
     const sideOn = metrics.torsoTilt <= this.cfg.maxTorsoTiltFromHorizontal;
     const facingCamera = metrics.foreshortening <= this.cfg.maxTorsoForeshortening;
-    const orientationOk = sideOn || facingCamera;
-    const straightOk = metrics.bodyStraightness >= this.cfg.minBodyStraightness;
+    const lyingOrFacing = sideOn || facingCamera;
+
+    const orientationOk =
+      this.cfg.orientation === 'any'
+        ? true
+        : this.cfg.orientation === 'upright'
+          ? !lyingOrFacing // squats: standing is the correct posture
+          : lyingOrFacing; // push-ups: a plank, side-on or towards the lens
+
+    const straightOk = this.cfg.requireStraightBody
+      ? metrics.bodyStraightness >= this.cfg.minBodyStraightness
+      : true;
     const positionValid = orientationOk && straightOk;
+
+    // Mid-set, orientation is only abandoned when it stays wrong for a stretch.
+    // Frame-by-frame vetoes would break sit-ups, whose torso is flat at the
+    // bottom of every rep and vertical at the top.
+    if (!positionValid) {
+      if (this.invalidSince === null) this.invalidSince = now;
+    } else {
+      this.invalidSince = null;
+    }
+    const sustainedInvalid =
+      this.invalidSince !== null && now - this.invalidSince > this.cfg.sustainedInvalidMs;
+    const counting = this.state === 'up' || this.state === 'down';
 
     const formWarning =
       metrics.bodyStraightness < this.cfg.bodyStraightnessWarnAt && straightOk
         ? 'Keep your hips in line with your shoulders.'
         : null;
 
-    if (!positionValid) {
+    if (!positionValid && (!counting || sustainedInvalid)) {
       if (this.attempt) this.attempt.poseIntact = false;
       this.validSince = null;
-      if (this.state === 'up' || this.state === 'down') {
+      if (counting) {
         this.state = 'calibrating';
         this.attempt = null;
       }
@@ -162,7 +195,9 @@ export class PushupCounter {
         rejected: null,
         depth: 0,
         coaching: !orientationOk
-          ? 'Get into a push-up position — the phone can be beside you or in front of you.'
+          ? this.cfg.orientation === 'upright'
+            ? 'Stand facing the camera, with your whole body in frame.'
+            : 'Get into position — the phone can be beside you or in front of you.'
           : 'Straighten your body — hips level with your shoulders.',
         formWarning: null,
         angle,

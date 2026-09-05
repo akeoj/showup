@@ -94,3 +94,47 @@ export async function getLastResult(): Promise<StoredResult | null> {
   // A result from days ago is noise, not context.
   return Date.now() - r.at > 24 * 60 * 60 * 1000 ? null : r;
 }
+
+// ---------------------------------------------------------------------------
+// Timed sessions
+// ---------------------------------------------------------------------------
+
+const TIMER_KEY = 'activeTimer';
+
+/**
+ * A running (or paused) timer, persisted so it survives the OS killing the app.
+ *
+ * `runningSince` is a wall-clock timestamp rather than a tick count: if the
+ * phone sleeps or the app is evicted for twenty minutes, those twenty minutes
+ * really did pass, and a timer that quietly stopped counting would be worse
+ * than useless for someone timing an hour of study.
+ */
+export interface ActiveTimer {
+  challengeId: string;
+  date: string;
+  /** The day's total before this session started, in the challenge's unit. */
+  base: number;
+  /** Whole seconds banked from earlier paused stretches of this session. */
+  accumulatedSec: number;
+  /** Epoch ms the current running stretch began, or null when paused. */
+  runningSince: number | null;
+  updatedAt: number;
+}
+
+export async function saveActiveTimer(t: Omit<ActiveTimer, 'updatedAt'>): Promise<void> {
+  await setKV(TIMER_KEY, { ...t, updatedAt: Date.now() } satisfies ActiveTimer);
+}
+
+export async function getActiveTimer(): Promise<ActiveTimer | null> {
+  return getKV<ActiveTimer>(TIMER_KEY);
+}
+
+export async function clearActiveTimer(): Promise<void> {
+  await delKV(TIMER_KEY);
+}
+
+/** Elapsed seconds including the stretch currently running. */
+export function timerElapsedSec(t: ActiveTimer, now = Date.now()): number {
+  const live = t.runningSince ? Math.max(0, Math.floor((now - t.runningSince) / 1000)) : 0;
+  return t.accumulatedSec + live;
+}

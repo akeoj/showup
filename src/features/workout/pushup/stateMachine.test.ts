@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PushupCounter } from './stateMachine';
-import { DEFAULT_PUSHUP_CONFIG } from './config';
+import { DEFAULT_PUSHUP_CONFIG, SITUP_CONFIG, SQUAT_CONFIG } from './config';
 import type { PoseMetrics } from './geometry';
 
 const cfg = DEFAULT_PUSHUP_CONFIG;
@@ -8,6 +8,8 @@ const cfg = DEFAULT_PUSHUP_CONFIG;
 function metrics(elbowAngle: number, overrides: Partial<PoseMetrics> = {}): PoseMetrics {
   return {
     elbowAngle,
+    kneeAngle: 175,
+    hipAngle: 175,
     bodyStraightness: 175,
     torsoTilt: 10,
     torsoRatio: 1.8,
@@ -346,5 +348,88 @@ describe('PushupCounter', () => {
     const mid = sweep(c, 170, 125, t, 300).last;
     expect(mid.depth).toBeGreaterThan(0);
     expect(mid.depth).toBeLessThanOrEqual(1);
+  });
+
+  // --- the same machine, pointed at other joints ---------------------------
+
+  it('counts squats from the knee angle while standing', () => {
+    const c = new PushupCounter(SQUAT_CONFIG);
+    // Standing: torso vertical and full length — correct for a squat, and the
+    // exact posture the push-up profile rejects.
+    const standing = (knee: number) =>
+      metrics(170, { kneeAngle: knee, torsoTilt: 85, torsoRatio: 2.1, legRatio: 1.9, foreshortening: 1.9 });
+
+    let t = 1000;
+    for (let i = 0; i < 40; i++) {
+      c.update(standing(175), t);
+      t += 33;
+    }
+    expect(c.currentState).toBe('up');
+
+    const sweepKnee = (from: number, to: number, ms: number) => {
+      const steps = Math.round(ms / 33);
+      for (let i = 1; i <= steps; i++) {
+        t += ms / steps;
+        c.update(standing(from + ((to - from) * i) / steps), t);
+      }
+    };
+    sweepKnee(175, 85, 600);
+    for (let i = 0; i < 5; i++) {
+      t += 33;
+      c.update(standing(85), t);
+    }
+    sweepKnee(85, 175, 600);
+
+    expect(c.reps).toBe(1);
+  });
+
+  it('does not count a squat from lying down', () => {
+    const c = new PushupCounter(SQUAT_CONFIG);
+    // Horizontal body: wrong orientation for a squat entirely.
+    const lying = (knee: number) => metrics(170, { kneeAngle: knee, torsoTilt: 8 });
+    let t = 1000;
+    for (let i = 0; i < 40; i++) {
+      c.update(lying(175), t);
+      t += 33;
+    }
+    for (let i = 0; i < 40; i++) {
+      c.update(lying(85), t);
+      t += 33;
+    }
+    expect(c.reps).toBe(0);
+  });
+
+  it('counts sit-ups from the hip angle, whose torso flips every rep', () => {
+    const c = new PushupCounter(SITUP_CONFIG);
+    // Flat on the floor at the bottom, torso vertical at the top. A per-frame
+    // orientation veto would abandon the set on every single repetition.
+    const situp = (hip: number, tilt: number) =>
+      metrics(170, { hipAngle: hip, bodyStraightness: hip, torsoTilt: tilt });
+
+    let t = 1000;
+    for (let i = 0; i < 40; i++) {
+      c.update(situp(150, 10), t);
+      t += 33;
+    }
+    expect(c.currentState).toBe('up');
+
+    const sweepHip = (from: number, to: number, tiltFrom: number, tiltTo: number, ms: number) => {
+      const steps = Math.round(ms / 33);
+      for (let i = 1; i <= steps; i++) {
+        t += ms / steps;
+        c.update(
+          situp(from + ((to - from) * i) / steps, tiltFrom + ((tiltTo - tiltFrom) * i) / steps),
+          t,
+        );
+      }
+    };
+    sweepHip(150, 60, 10, 80, 500);
+    for (let i = 0; i < 4; i++) {
+      t += 33;
+      c.update(situp(60, 80), t);
+    }
+    sweepHip(60, 150, 80, 10, 500);
+
+    expect(c.reps).toBe(1);
   });
 });

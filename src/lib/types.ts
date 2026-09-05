@@ -1,6 +1,13 @@
 export type Visibility = 'private' | 'public';
-export type TrackingMode = 'cv' | 'manual';
-export type WorkoutSource = 'cv' | 'manual';
+/**
+ * How a challenge is logged.
+ *  cv      — counted by the camera (push-ups, squats, sit-ups)
+ *  timer   — the app runs a stopwatch and logs real elapsed time
+ *  checkin — one button: done today, or not
+ *  manual  — the participant types a number
+ */
+export type TrackingMode = 'cv' | 'manual' | 'timer' | 'checkin';
+export type WorkoutSource = 'cv' | 'manual' | 'timer' | 'checkin';
 
 export interface Challenge {
   id: string;

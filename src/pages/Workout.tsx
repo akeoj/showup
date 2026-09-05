@@ -8,7 +8,7 @@ import { useCamera } from '@/features/workout/camera/useCamera';
 import { useWorkoutEngine } from '@/features/workout/useWorkoutEngine';
 import { useRecorder } from '@/features/workout/recording/useRecorder';
 import { rejectionHint } from '@/features/workout/pushup/stateMachine';
-import { LENIENT_PUSHUP_CONFIG } from '@/features/workout/pushup/config';
+import { configForExercise } from '@/features/workout/pushup/config';
 import { getActivity } from '@/lib/activities';
 import { clearActiveWorkout, getActiveWorkout, saveActiveWorkout } from '@/lib/appMemory';
 import { useAppStore } from '@/store/appStore';
@@ -55,7 +55,12 @@ export function Workout() {
   const { ui, start, preload, pause, resume, stop, adjustReps } = useWorkoutEngine(
     videoRef,
     canvasRef,
-    { onRep: persistRep, config: lenient ? LENIENT_PUSHUP_CONFIG : undefined },
+    {
+      onRep: persistRep,
+      // Push-ups, squats and sit-ups are the same counter pointed at a
+      // different joint, with a different idea of a valid body position.
+      config: configForExercise(challenge?.activity_type ?? 'pushups', lenient),
+    },
   );
 
   const recorder = useRecorder(videoRef);
@@ -296,6 +301,18 @@ export function Workout() {
               fits in the picture, head to feet — usually 2–3 metres. Beside you or straight in
               front both work. Good light on you, not behind you.
             </p>
+            {challenge.activity_type === 'squats' && (
+              <p className="mt-2 text-sm text-muted">
+                Stand facing the camera or side-on. It watches your knees, so they need to be in
+                shot for the whole movement.
+              </p>
+            )}
+            {challenge.activity_type === 'situps' && (
+              <p className="mt-2 text-sm text-muted">
+                Lie side-on to the camera with your knees bent. It watches the angle between your
+                torso and your thighs.
+              </p>
+            )}
 
             <ul className="mt-5 space-y-2 text-sm text-muted">
               <li>📏 Whole body in frame — legs included, not just your top half</li>

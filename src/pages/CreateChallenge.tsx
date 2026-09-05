@@ -4,10 +4,10 @@ import { AppShell } from '@/components/AppShell';
 import { Button } from '@/components/Button';
 import { ShareChallenge } from '@/components/ShareChallenge';
 import { createChallenge } from '@/features/challenges/api';
-import { ACTIVITIES, getActivity } from '@/lib/activities';
+import { ACTIVITIES, getActivity, MODE_LABEL } from '@/lib/activities';
 import { addDays, DEVICE_TIMEZONE, todayInZone } from '@/lib/dates';
 import { useAppStore } from '@/store/appStore';
-import type { Challenge, Visibility } from '@/lib/types';
+import type { Challenge, TrackingMode, Visibility } from '@/lib/types';
 
 const TIMEZONES = [
   'Africa/Lagos',
@@ -31,6 +31,7 @@ export function CreateChallenge() {
   const [name, setName] = useState('');
   const [activityId, setActivityId] = useState('pushups');
   const [customUnit, setCustomUnit] = useState('');
+  const [customMode, setCustomMode] = useState<TrackingMode>('manual');
   const [target, setTarget] = useState('100');
   const [nickname, setLocalNick] = useState(storedNickname);
   const [visibility, setVisibility] = useState<Visibility>('private');
@@ -43,18 +44,28 @@ export function CreateChallenge() {
   const [end, setEnd] = useState(addDays(today, 29));
 
   const activity = getActivity(activityId);
-  const unit = activityId === 'custom' ? customUnit.trim() || 'count' : activity.unit;
+  const trackingMode: TrackingMode = activityId === 'custom' ? customMode : activity.tracking;
+  const unit =
+    activityId === 'custom'
+      ? customMode === 'checkin'
+        ? 'day'
+        : customMode === 'timer'
+          ? 'minutes'
+          : customUnit.trim() || 'count'
+      : activity.unit;
 
   const problems = useMemo(() => {
     const list: string[] = [];
     if (name.trim().length < 3) list.push('Give the challenge a name (3+ characters).');
     if (nickname.trim().length < 1) list.push('Enter the name others will see.');
-    const t = Number(target);
-    if (!Number.isFinite(t) || t < 1) list.push('Daily target must be at least 1.');
-    if (t > activity.maxDaily) list.push(`Daily target looks too high for ${activity.label}.`);
+    if (trackingMode !== 'checkin') {
+      const t = Number(target);
+      if (!Number.isFinite(t) || t < 1) list.push('Daily target must be at least 1.');
+      if (t > activity.maxDaily) list.push(`Daily target looks too high for ${activity.label}.`);
+    }
     if (end < start) list.push('End date must be on or after the start date.');
     return list;
-  }, [name, nickname, target, activity, start, end]);
+  }, [name, nickname, target, activity, start, end, trackingMode]);
 
   const submit = async () => {
     if (problems.length) return;
@@ -65,9 +76,9 @@ export function CreateChallenge() {
       const challenge = await createChallenge({
         name: name.trim(),
         activity_type: activityId,
-        tracking_mode: activity.tracking,
+        tracking_mode: trackingMode,
         unit,
-        daily_target: Math.round(Number(target)),
+        daily_target: trackingMode === 'checkin' ? 1 : Math.round(Number(target)),
         start_date: start,
         end_date: end,
         visibility,
@@ -148,23 +159,53 @@ export function CreateChallenge() {
               >
                 <span aria-hidden>{a.emoji}</span>
                 <span className="min-w-0 flex-1 truncate">{a.label}</span>
-                {a.tracking === 'cv' && (
-                  <span className="rounded bg-lime/20 px-1.5 py-0.5 text-[10px] font-semibold text-lime">
-                    AUTO
+                {a.tracking !== 'manual' && (
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                      a.tracking === 'cv'
+                        ? 'bg-lime/20 text-lime'
+                        : a.tracking === 'timer'
+                          ? 'bg-flame/20 text-flame'
+                          : 'bg-white/10 text-muted'
+                    }`}
+                  >
+                    {MODE_LABEL[a.tracking]}
                   </span>
                 )}
               </button>
             ))}
           </div>
           <p className="mt-2 text-xs text-muted">
-            {activity.tracking === 'cv'
-              ? 'Counted automatically by your camera — and you can always log it by hand.'
-              : 'Participants log this one themselves.'}
+            {trackingMode === 'cv'
+              ? 'Counted by the camera — and everyone can still log it by hand.'
+              : trackingMode === 'timer'
+                ? 'The app runs a stopwatch and records the real elapsed time.'
+                : trackingMode === 'checkin'
+                  ? 'One tap a day: done or not done. No numbers.'
+                  : 'Participants type the number themselves.'}
           </p>
         </div>
 
         {activityId === 'custom' && (
           <div>
+            <span className="label">How should people log it?</span>
+            <div className="mb-4 grid grid-cols-3 gap-2">
+              {(['manual', 'timer', 'checkin'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setCustomMode(m)}
+                  aria-pressed={customMode === m}
+                  className={`rounded-xl border px-2 py-2.5 text-xs transition ${
+                    customMode === m
+                      ? 'border-flame bg-flame/10'
+                      : 'border-line bg-surface2 text-muted'
+                  }`}
+                >
+                  {m === 'manual' ? 'Type a number' : m === 'timer' ? 'Time it' : 'Yes / no'}
+                </button>
+              ))}
+            </div>
             <label className="label" htmlFor="c-unit">
               What are you counting?
             </label>
@@ -174,11 +215,20 @@ export function CreateChallenge() {
               value={customUnit}
               maxLength={16}
               placeholder="glasses of water"
+              disabled={customMode !== 'manual'}
               onChange={(e) => setCustomUnit(e.target.value)}
             />
+            {customMode !== 'manual' && (
+              <p className="mt-1.5 text-xs text-muted">
+                {customMode === 'timer'
+                  ? 'Timed challenges are measured in minutes.'
+                  : 'Yes/no challenges just need a daily tick.'}
+              </p>
+            )}
           </div>
         )}
 
+        {trackingMode !== 'checkin' && (
         <div>
           <label className="label" htmlFor="c-target">
             Daily target ({unit})
@@ -193,6 +243,7 @@ export function CreateChallenge() {
             onChange={(e) => setTarget(e.target.value)}
           />
         </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>

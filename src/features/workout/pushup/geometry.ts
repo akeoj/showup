@@ -164,6 +164,10 @@ export function computeFraming(landmarks: Landmark[], minVisibility: number): Fr
 export interface PoseMetrics {
   /** Elbow angle, from 3D world landmarks when available. */
   elbowAngle: number;
+  /** Knee angle (hip-knee-ankle) — drives squats. */
+  kneeAngle: number;
+  /** Hip angle (shoulder-hip-knee) — drives sit-ups. Same as bodyStraightness. */
+  hipAngle: number;
   /** Shoulder–hip–knee angle: 180 is a plank, less is sagging or piked. */
   bodyStraightness: number;
   /** Torso deviation from horizontal in the image, in degrees. */
@@ -247,6 +251,7 @@ export function computeMetrics(
   const useWorld = !!world && world.length >= 29;
 
   const elbowAngles: number[] = [];
+  const kneeAngles: number[] = [];
   const straightness: number[] = [];
   const tilts: number[] = [];
   const confidences: number[] = [];
@@ -296,6 +301,16 @@ export function computeMetrics(
       );
       confidences.push(
         ((shoulder.visibility ?? 1) + (elbow.visibility ?? 1) + (wrist.visibility ?? 1)) / 3,
+      );
+    }
+
+    // Knee angle for squats: hip-knee-ankle. Same 3D reasoning as the elbow.
+    const ankle = landmarks[s.knee + 2];
+    if (useWorld ? !!(hip && knee && ankle) : visible(hip, minVisibility) && visible(knee, minVisibility) && visible(ankle, minVisibility)) {
+      kneeAngles.push(
+        useWorld
+          ? angleDeg3D(world![s.hip], world![s.knee], world![s.knee + 2])
+          : angleDeg(hip, knee, ankle),
       );
     }
 
@@ -350,11 +365,15 @@ export function computeMetrics(
   // collapses. Anything else is someone upright.
   const view: CameraView = torsoTilt <= 55 ? 'side' : foreshortening <= 1.15 ? 'facing' : 'upright';
 
+  const straightnessMean = mean(straightness, 180);
+
   return {
     elbowAngle: mean(elbowAngles, 180),
+    kneeAngle: mean(kneeAngles, 180),
+    hipAngle: straightnessMean,
     // With knees out of frame we cannot judge straightness; assume a plank
     // rather than blocking the user for a framing choice we recommended.
-    bodyStraightness: mean(straightness, 180),
+    bodyStraightness: straightnessMean,
     torsoTilt,
     torsoRatio,
     legRatio,

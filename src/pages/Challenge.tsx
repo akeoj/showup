@@ -67,7 +67,11 @@ export function ChallengePage() {
   const me = rows.find((r) => r.user_id === userId);
   const streak = me?.current_streak ?? 0;
   const rank = rows.length && me ? [...rows].findIndex((r) => r.user_id === me.user_id) + 1 : null;
-  const canCount = challenge.tracking_mode === 'cv';
+  const mode = challenge.tracking_mode;
+  const canCount = mode === 'cv';
+  const isCheckin = mode === 'checkin';
+  const isTimer = mode === 'timer';
+  const doneToday = count >= challenge.daily_target;
 
   const join = async () => {
     setJoining(true);
@@ -84,7 +88,7 @@ export function ChallengePage() {
       challengeId: challenge.id,
       date: today,
       count: total,
-      source: 'manual',
+      source: challenge.tracking_mode === 'checkin' ? 'checkin' : 'manual',
     });
     await reloadToday();
     await reloadHistory();
@@ -162,14 +166,45 @@ export function ChallengePage() {
 
           {status === 'active' && member !== false && (
             <div className="mt-4 space-y-2">
-              {canCount && (
-                <Button full onClick={() => navigate(`/challenge/${challenge.id}/workout`)}>
-                  Start workout
-                </Button>
+              {/* One primary action per mode. A check-in challenge should never
+                  ask someone to type "1", and a timed one should never ask for
+                  a number it can measure itself. */}
+              {isCheckin ? (
+                doneToday ? (
+                  <>
+                    <div className="rounded-xl bg-lime/15 py-3 text-center font-semibold text-lime">
+                      Done today ✓
+                    </div>
+                    <Button full variant="ghost" onClick={() => void saveManual(0)}>
+                      Undo
+                    </Button>
+                  </>
+                ) : (
+                  <Button full onClick={() => void saveManual(1)}>
+                    Mark today done
+                  </Button>
+                )
+              ) : (
+                <>
+                  {canCount && (
+                    <Button full onClick={() => navigate(`/challenge/${challenge.id}/workout`)}>
+                      Start workout
+                    </Button>
+                  )}
+                  {isTimer && (
+                    <Button full onClick={() => navigate(`/challenge/${challenge.id}/timer`)}>
+                      Start timer
+                    </Button>
+                  )}
+                  <Button
+                    full
+                    variant={canCount || isTimer ? 'secondary' : 'primary'}
+                    onClick={() => setManualOpen(true)}
+                  >
+                    {canCount || isTimer ? 'Log it myself' : `Log ${challenge.unit}`}
+                  </Button>
+                </>
               )}
-              <Button full variant={canCount ? 'secondary' : 'primary'} onClick={() => setManualOpen(true)}>
-                {canCount ? 'Log it myself' : `Log ${challenge.unit}`}
-              </Button>
             </div>
           )}
         </section>

@@ -22,6 +22,7 @@ import type {
   MyChallenge,
   Participant,
   PublicChallenge,
+  TrackingMode,
   Visibility,
   WorkoutSource,
 } from '@/lib/types';
@@ -74,7 +75,7 @@ export function describeRpcError(message: string, feature: string): string {
 export interface CreateChallengeInput {
   name: string;
   activity_type: string;
-  tracking_mode: 'cv' | 'manual';
+  tracking_mode: TrackingMode;
   unit: string;
   daily_target: number;
   start_date: string;
