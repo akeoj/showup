@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from './Button';
+import { TransferCode } from './TransferCode';
+import { isSupabaseConfigured } from '@/lib/supabase';
 import {
   installCapability,
   onInstallChange,
@@ -125,6 +127,25 @@ export function InstallPrompt({ headline, variant = 'card' }: Props) {
                 This only works in Safari. If you opened the link from WhatsApp, tap the ⋯ menu
                 first and choose Open in Safari.
               </p>
+
+              {/*
+                On iOS the installed app gets a storage container completely
+                separate from Safari's, so anything logged in the browser does
+                NOT come across. The code has to be taken before installing —
+                afterwards, this page can no longer see the old identity.
+              */}
+              {isSupabaseConfigured && (
+                <div className="mt-4 rounded-xl border border-flame/30 bg-flame/10 p-3">
+                  <p className="text-sm font-medium">Take your progress with you</p>
+                  <p className="mt-1 text-xs text-muted">
+                    The home-screen app starts with its own storage, so anything you've logged here
+                    won't appear in it. Grab this code first and enter it once in the app.
+                  </p>
+                  <div className="mt-3">
+                    <TransferCode />
+                  </div>
+                </div>
+              )}
               <Button
                 full
                 className="mt-5"

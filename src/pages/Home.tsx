@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '@/components/AppShell';
 import { Button } from '@/components/Button';
 import { InstallPrompt } from '@/components/InstallPrompt';
+import { RestoreProgress } from '@/components/RestoreProgress';
+import { TransferCode } from '@/components/TransferCode';
 import { ProgressBar } from '@/components/ProgressBar';
 import { getMyChallenges, getMyChallengesCached } from '@/features/challenges/api';
 import { isSupabaseConfigured } from '@/lib/supabase';
@@ -12,6 +14,15 @@ import type { MyChallenge } from '@/lib/types';
 export function Home() {
   const [mine, setMine] = useState<MyChallenge[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showTransfer, setShowTransfer] = useState(false);
+
+  const reloadMine = useCallback(async () => {
+    try {
+      setMine(await getMyChallenges());
+    } catch {
+      /* keep whatever is already showing */
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,8 +93,27 @@ export function Home() {
         </Link>
       </div>
 
+      {/*
+        The recovery path for the iOS storage split: a freshly installed app
+        shows nothing, and without this the only visible option is to start
+        over. Offered prominently when empty, quietly once there are
+        challenges to show.
+      */}
+      {!loading && mine.length === 0 && (
+        <div className="card mt-6 border-line">
+          <p className="text-sm font-medium">Used Showup in your browser already?</p>
+          <p className="mt-1 text-sm text-muted">
+            Apps added to the home screen start with their own storage, so your challenges don't
+            carry over on their own. A transfer code brings them across.
+          </p>
+          <div className="mt-2">
+            <RestoreProgress onDone={reloadMine} />
+          </div>
+        </div>
+      )}
+
       {!loading && mine.length > 0 && (
-        <section className="mt-9">
+        <section className="mt-9 mb-8">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted">
             Your challenges
           </h2>
@@ -125,6 +155,35 @@ export function Home() {
               );
             })}
           </div>
+        </section>
+      )}
+
+      {/* Always reachable: the other end of the transfer, for moving to a new
+          phone or to the home-screen app. */}
+      {!loading && mine.length > 0 && (
+        <section className="mt-4 border-t border-line/60 pt-5">
+          {showTransfer ? (
+            <div>
+              <p className="mb-2 text-sm text-muted">
+                Enter this code in Showup on the other device. It works once, and lasts 30 minutes.
+              </p>
+              <TransferCode auto />
+              <button
+                onClick={() => setShowTransfer(false)}
+                className="mt-3 w-full py-1 text-center text-sm text-muted underline underline-offset-4"
+              >
+                Close
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowTransfer(true)}
+              className="w-full py-2 text-center text-sm text-muted underline underline-offset-4"
+            >
+              Move to another device
+            </button>
+          )}
+          <RestoreProgress onDone={reloadMine} />
         </section>
       )}
     </AppShell>

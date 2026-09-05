@@ -8,6 +8,7 @@ import {
   rememberMembership,
   saveLocalWorkout,
   setLocalNickname,
+  workoutKey,
 } from '@/lib/db';
 import { isOnline } from '@/lib/network';
 import { ensureSession, isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -418,4 +419,106 @@ export async function restoreAfterIdentityReset(): Promise<{
 
   void flushQueue('identity-restore');
   return { challenges: rejoined, workouts: workouts.length };
+}
+
+// ---------------------------------------------------------------------------
+// Portable identity
+// ---------------------------------------------------------------------------
+
+export interface TransferCode {
+  code: string;
+  expires_at: string;
+}
+
+/**
+ * Issue a code that moves this participant's history to another install.
+ *
+ * Needed because an iOS home-screen app gets a storage container completely
+ * separate from Safari's: the anonymous identity that has been logging
+ * workouts all week does not come across, and there is no API that would let
+ * it. So the identity is made portable instead — this also happens to solve
+ * "I got a new phone", which was otherwise unrecoverable for an account with
+ * no password.
+ */
+export async function createTransferCode(): Promise<TransferCode> {
+  assertOnline();
+  const uid = await ensureSession();
+  if (!uid) throw new Error('Not signed in yet — try again in a moment.');
+
+  const { data, error } = await supabase.rpc('create_transfer_code');
+  if (error) throw new Error(error.message);
+
+  const row = (data as TransferCode[])?.[0];
+  if (!row) throw new Error('Could not create a transfer code.');
+  return row;
+}
+
+export interface TransferResult {
+  challenges_moved: number;
+  workouts_moved: number;
+  nickname: string;
+}
+
+/** Redeem a code, then pull everything it moved down onto this device. */
+export async function claimTransfer(code: string): Promise<TransferResult> {
+  assertOnline();
+  const uid = await ensureSession();
+  if (!uid) throw new Error('Not signed in yet — try again in a moment.');
+
+  const { data, error } = await supabase.rpc('claim_transfer', {
+    p_code: code.trim().toUpperCase(),
+  });
+
+  if (error) {
+    throw new Error(
+      error.message.includes('not valid or has expired')
+        ? 'That code is not valid, has already been used, or has expired. Codes last 30 minutes.'
+        : error.message,
+    );
+  }
+
+  const result = (data as TransferResult[])?.[0] ?? {
+    challenges_moved: 0,
+    workouts_moved: 0,
+    nickname: '',
+  };
+
+  if (result.nickname) await setLocalNickname(result.nickname);
+  await hydrateFromServer();
+  return result;
+}
+
+/**
+ * Rebuild the local store from the server: memberships, cached challenges and
+ * every daily total. Rows land marked `synced` so the sync queue has nothing
+ * to push back — this is a download, not a set of pending writes.
+ */
+export async function hydrateFromServer(): Promise<void> {
+  if (!isSupabaseConfigured || !isOnline()) return;
+  await ensureSession();
+
+  const rows = await getMyChallenges();
+  const fallbackNickname = (await getLocalNickname()) || 'Anonymous';
+
+  for (const c of rows) {
+    await rememberMembership({
+      challenge_id: c.id,
+      nickname: fallbackNickname,
+      is_owner: c.is_owner,
+      joined_at: Date.now(),
+    });
+
+    const history = await getMyHistory(c.id);
+    for (const h of history) {
+      await db.workouts.put({
+        key: workoutKey(c.id, h.workout_date),
+        challenge_id: c.id,
+        workout_date: h.workout_date,
+        count: h.count,
+        source: 'cv',
+        updated_at: Date.now(),
+        synced: true,
+      });
+    }
+  }
 }
