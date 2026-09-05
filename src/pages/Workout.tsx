@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/Button';
 import { ManualEntry } from '@/components/ManualEntry';
@@ -8,6 +8,7 @@ import { useCamera } from '@/features/workout/camera/useCamera';
 import { useWorkoutEngine } from '@/features/workout/useWorkoutEngine';
 import { rejectionHint } from '@/features/workout/pushup/stateMachine';
 import { getActivity } from '@/lib/activities';
+import { clearActiveWorkout, getActiveWorkout, saveActiveWorkout } from '@/lib/appMemory';
 import { useAppStore } from '@/store/appStore';
 
 export function Workout() {
@@ -20,15 +21,54 @@ export function Workout() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const camera = useCamera(videoRef);
-  const { ui, start, pause, resume, stop, adjustReps } = useWorkoutEngine(videoRef, canvasRef);
-
   const [phase, setPhase] = useState<'intro' | 'live' | 'paused' | 'saving'>('intro');
   const [manualOpen, setManualOpen] = useState(false);
   const [popKey, setPopKey] = useState(0);
+  const [resumable, setResumable] = useState<number | null>(null);
+
+  // The day's total before this session. Captured once at start so the final
+  // number is always base + reps, whatever happens in between.
+  const baseRef = useRef(0);
+
+  /**
+   * Written on every counted rep — not every frame.
+   *
+   * This is the whole point of the change: if iOS drops the app mid-set, the
+   * reps are already on disk, and the next launch banks them instead of the
+   * participant discovering they did 40 push-ups for nothing.
+   */
+  const persistRep = useCallback(
+    (reps: number) => {
+      if (!challenge) return;
+      void saveActiveWorkout({
+        challengeId: challenge.id,
+        date: today,
+        base: baseRef.current,
+        reps,
+        startedAt: Date.now(),
+      });
+    },
+    [challenge, today],
+  );
+
+  const camera = useCamera(videoRef);
+  const { ui, start, pause, resume, stop, adjustReps } = useWorkoutEngine(videoRef, canvasRef, {
+    onRep: persistRep,
+  });
 
   useEffect(() => setPopKey((k) => k + 1), [ui.reps]);
   useEffect(() => stop, [stop]);
+
+  // An unfinished session for this same challenge and day can be picked up
+  // where it left off rather than restarted from zero.
+  useEffect(() => {
+    if (!challenge) return;
+    void getActiveWorkout().then((active) => {
+      if (active && active.challengeId === challenge.id && active.date === today && active.reps > 0) {
+        setResumable(active.reps);
+      }
+    });
+  }, [challenge, today]);
 
   // Keep the screen awake during a set — the phone is on the floor, untouched.
   useEffect(() => {
@@ -50,10 +90,12 @@ export function Workout() {
   const sessionTotal = alreadyToday + ui.reps;
   const remaining = Math.max(0, challenge.daily_target - sessionTotal);
 
-  const begin = async () => {
+  const begin = async (seed = 0) => {
     const ok = await camera.start('user');
     if (!ok) return;
-    await start(0);
+    baseRef.current = alreadyToday;
+    await start(seed);
+    if (seed > 0) persistRep(seed);
     setPhase('live');
   };
 
@@ -68,6 +110,7 @@ export function Workout() {
       count: sessionTotal,
       source: 'cv',
     });
+    await clearActiveWorkout();
     await reload();
 
     setLastResult({
@@ -81,6 +124,7 @@ export function Workout() {
 
   const saveManual = async (total: number) => {
     await recordWorkout({ challengeId: challenge.id, date: today, count: total, source: 'manual' });
+    await clearActiveWorkout();
     await reload();
     setLastResult({
       challengeId: challenge.id,
@@ -89,6 +133,23 @@ export function Workout() {
       target: challenge.daily_target,
     });
     navigate(`/challenge/${challenge.id}/results`, { replace: true });
+  };
+
+  const abandon = async () => {
+    stop();
+    camera.stop();
+    // Anything counted still belongs to the participant, so it is banked
+    // rather than dropped — cancel means "stop counting", not "delete my reps".
+    if (ui.reps > 0) {
+      await recordWorkout({
+        challengeId: challenge.id,
+        date: today,
+        count: alreadyToday + ui.reps,
+        source: 'cv',
+      });
+    }
+    await clearActiveWorkout();
+    navigate(`/challenge/${challenge.id}`);
   };
 
   // ---- Intro / permission screen -----------------------------------------
@@ -115,19 +176,36 @@ export function Workout() {
             <li>🔒 The video never leaves this phone — only your count is saved</li>
           </ul>
 
+          {resumable !== null && (
+            <div className="card mt-5 border-flame/40 bg-flame/10">
+              <p className="text-sm">
+                You were at <span className="tabular font-semibold">{resumable}</span>{' '}
+                {challenge.unit} when this was interrupted.
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button variant="secondary" onClick={() => setResumable(null)}>
+                  Start fresh
+                </Button>
+                <Button onClick={() => void begin(resumable)}>Continue from {resumable}</Button>
+              </div>
+            </div>
+          )}
+
           {camera.error && (
             <div className="card mt-5 border-red-500/40 bg-red-500/10 text-sm">{camera.error}</div>
           )}
 
           {ui.modelStatus === 'error' && (
-            <div className="card mt-3 border-red-500/40 bg-red-500/10 text-sm">
-              {ui.modelError}
-            </div>
+            <div className="card mt-3 border-red-500/40 bg-red-500/10 text-sm">{ui.modelError}</div>
           )}
         </div>
 
         <div className="space-y-2 pt-6">
-          <Button full onClick={begin} loading={camera.status === 'requesting' || ui.modelStatus === 'loading'}>
+          <Button
+            full
+            onClick={() => void begin(0)}
+            loading={camera.status === 'requesting' || ui.modelStatus === 'loading'}
+          >
             {ui.modelStatus === 'loading' ? 'Loading counter…' : 'Start workout'}
           </Button>
           <Button full variant="secondary" onClick={() => setManualOpen(true)}>
@@ -170,14 +248,10 @@ export function Workout() {
       {/* Top bar */}
       <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent p-4 pt-[max(1rem,env(safe-area-inset-top))]">
         <button
-          onClick={() => {
-            stop();
-            camera.stop();
-            navigate(`/challenge/${challenge.id}`);
-          }}
+          onClick={() => void abandon()}
           className="rounded-full bg-black/40 px-4 py-2 text-sm text-white backdrop-blur"
         >
-          Cancel
+          Done for now
         </button>
         <span className="rounded-full bg-black/40 px-3 py-1.5 text-xs text-white/70 backdrop-blur tabular">
           {ui.fps} fps · {ui.delegate}
@@ -215,7 +289,10 @@ export function Workout() {
       <div className="absolute inset-x-0 bottom-0 space-y-3 bg-gradient-to-t from-black/80 to-transparent p-4 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
         <div className="flex items-center justify-center gap-3">
           <button
-            onClick={() => adjustReps(-1)}
+            onClick={() => {
+              adjustReps(-1);
+              persistRep(Math.max(0, ui.reps - 1));
+            }}
             aria-label="Remove one rep"
             className="h-12 w-12 rounded-full bg-white/10 text-2xl text-white backdrop-blur"
           >
@@ -223,7 +300,10 @@ export function Workout() {
           </button>
           <span className="text-xs text-white/60">miscounted?</span>
           <button
-            onClick={() => adjustReps(1)}
+            onClick={() => {
+              adjustReps(1);
+              persistRep(ui.reps + 1);
+            }}
             aria-label="Add one rep"
             className="h-12 w-12 rounded-full bg-white/10 text-2xl text-white backdrop-blur"
           >

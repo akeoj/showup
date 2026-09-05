@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { RouteMemory } from './RouteMemory';
 import { Home } from '@/pages/Home';
 import { CreateChallenge } from '@/pages/CreateChallenge';
 import { JoinChallenge } from '@/pages/JoinChallenge';
@@ -15,25 +16,32 @@ const Workout = lazy(() => import('@/pages/Workout').then((m) => ({ default: m.W
 
 const Loading = () => <p className="p-10 text-center text-muted">Loading…</p>;
 
+// Every route sits under RouteMemory so the app can put you back where you
+// were when the OS relaunches it.
 const router = createBrowserRouter([
-  { path: '/', element: <Home /> },
-  { path: '/create', element: <CreateChallenge /> },
-  { path: '/join', element: <JoinChallenge /> },
-  { path: '/join/:code', element: <JoinChallenge /> },
-  { path: '/explore', element: <Explore /> },
-  { path: '/challenge/:id', element: <ChallengePage /> },
   {
-    path: '/challenge/:id/workout',
-    element: (
-      <Suspense fallback={<Loading />}>
-        <Workout />
-      </Suspense>
-    ),
+    element: <RouteMemory />,
+    children: [
+      { path: '/', element: <Home /> },
+      { path: '/create', element: <CreateChallenge /> },
+      { path: '/join', element: <JoinChallenge /> },
+      { path: '/join/:code', element: <JoinChallenge /> },
+      { path: '/explore', element: <Explore /> },
+      { path: '/challenge/:id', element: <ChallengePage /> },
+      {
+        path: '/challenge/:id/workout',
+        element: (
+          <Suspense fallback={<Loading />}>
+            <Workout />
+          </Suspense>
+        ),
+      },
+      { path: '/challenge/:id/results', element: <Results /> },
+      { path: '/challenge/:id/leaderboard', element: <LeaderboardPage /> },
+      { path: '/challenge/:id/manage', element: <Manage /> },
+      { path: '*', element: <Home /> },
+    ],
   },
-  { path: '/challenge/:id/results', element: <Results /> },
-  { path: '/challenge/:id/leaderboard', element: <LeaderboardPage /> },
-  { path: '/challenge/:id/manage', element: <Manage /> },
-  { path: '*', element: <Home /> },
 ]);
 
 export function AppRouter() {

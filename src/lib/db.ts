@@ -46,6 +46,17 @@ export interface SessionMirror {
   saved_at: number;
 }
 
+/**
+ * Small durable values that are not entities: the last route, an in-flight
+ * workout, the most recent result. React state does not survive iOS killing a
+ * backgrounded web app, so anything the user would be upset to lose lives here.
+ */
+export interface KV {
+  key: string;
+  value: unknown;
+  updated_at: number;
+}
+
 class ShowupDB extends Dexie {
   localUser!: Table<LocalUser, string>;
   challenges!: Table<Challenge, string>;
@@ -55,6 +66,7 @@ class ShowupDB extends Dexie {
   leaderboards!: Table<CachedLeaderboard, string>;
   histories!: Table<CachedHistory, string>;
   session!: Table<SessionMirror, string>;
+  kv!: Table<KV, string>;
 
   constructor() {
     super('showup');
@@ -72,10 +84,26 @@ class ShowupDB extends Dexie {
     this.version(2).stores({
       session: 'id',
     });
+    this.version(3).stores({
+      kv: 'key',
+    });
   }
 }
 
 export const db = new ShowupDB();
+
+export async function getKV<T>(key: string): Promise<T | null> {
+  const row = await db.kv.get(key);
+  return row ? (row.value as T) : null;
+}
+
+export async function setKV(key: string, value: unknown): Promise<void> {
+  await db.kv.put({ key, value, updated_at: Date.now() });
+}
+
+export async function delKV(key: string): Promise<void> {
+  await db.kv.delete(key);
+}
 
 export const workoutKey = (challengeId: string, date: string) => `${challengeId}:${date}`;
 

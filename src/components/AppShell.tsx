@@ -81,6 +81,22 @@ function RestoreBanner() {
   const restoring = useAppStore((s) => s.restoring);
   const restored = useAppStore((s) => s.restored);
   const dismiss = useAppStore((s) => s.dismissRestored);
+  const recoveredReps = useAppStore((s) => s.recoveredReps);
+  const dismissRecovered = useAppStore((s) => s.dismissRecovered);
+
+  if (recoveredReps) {
+    return (
+      <div role="status" className="flex items-center gap-2 bg-lime/15 px-4 py-2 text-sm text-lime">
+        <span className="flex-1">
+          Saved the {recoveredReps} rep{recoveredReps === 1 ? '' : 's'} from the workout that got
+          interrupted.
+        </span>
+        <button onClick={dismissRecovered} aria-label="Dismiss" className="px-2 text-lg leading-none">
+          ×
+        </button>
+      </div>
+    );
+  }
 
   if (restoring) {
     return (
